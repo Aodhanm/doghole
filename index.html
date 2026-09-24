@@ -110,14 +110,13 @@
   #curtain { position: absolute; inset: 0; display: grid; place-content: center;
     gap: 16px; justify-items: center; z-index: 6;
     background: radial-gradient(ellipse at 50% 50%,
-      rgba(5,8,13,.62) 0%, rgba(5,8,13,.80) 46%, rgba(5,8,13,.93) 100%);
+      rgba(5,8,13,.24) 0%, rgba(5,8,13,.46) 50%, rgba(5,8,13,.72) 100%);
     transition: opacity 1.4s ease; cursor: pointer; }
   #curtain.gone { opacity: 0; pointer-events: none; }
-  #curtain .mark { font-family: var(--display);
-    font-size: clamp(30px, 5.4vw, 62px); color: #f2f6f9; letter-spacing: .01em;
-    text-shadow: 0 3px 18px rgba(0,0,0,.9), 0 1px 3px rgba(0,0,0,.95); }
-  #curtain p { margin: 0; font-size: 13px; letter-spacing: .12em;
-    color: var(--amber); text-shadow: 0 1px 6px rgba(0,0,0,.95); }
+  #curtain p { margin: 0; font-size: 15px; letter-spacing: .16em;
+    color: var(--amber); padding: 9px 20px; border: 1px solid rgba(232,163,61,.45);
+    border-radius: 2px; background: rgba(5,8,13,.72);
+    text-shadow: 0 1px 6px rgba(0,0,0,.95); }
 
   @media (prefers-reduced-motion: reduce) { #curtain, button { transition: none; } }
   @media (max-width: 760px) {
@@ -153,7 +152,6 @@
   <!-- hint row removed 2026-09-22: nothing along the bottom -->
 
   <div id="curtain">
-    <span class="mark" id="curtainmark">Doghole</span>
     <p>Click to begin &middot; sound on</p>
   </div>
 </div>
@@ -1245,7 +1243,6 @@ resize(); requestAnimationFrame(frame);
 let ni = 0;
 const h1 = document.getElementById("gametitle");
 const eb = document.getElementById("eyebrow");
-const mark = document.getElementById("curtainmark");
 function paintName() {
   const n = LANDINGS[ni];
   document.getElementById("landingname").textContent = n.t;
