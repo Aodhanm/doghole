@@ -1,0 +1,2001 @@
+<meta charset="utf-8">
+<title>Doghole &mdash; the Golden Gate, 1905</title>
+<style>
+  :root{ --bg:#070a0f; --amber:#f2a63c; --dim:#8b97a3; --green:#7fd6a2;
+    --display: Trattatello, Luminari, "Academy Engraved LET", serif; }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{margin:0;background:var(--bg);color:#dfe6ec;overflow:hidden;
+    font-family:var(--display);-webkit-font-smoothing:antialiased}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .plate{position:absolute;inset:0;pointer-events:none;padding:clamp(12px,2vw,26px) clamp(14px,2.4vw,34px)}
+  .tl{position:absolute;left:clamp(14px,2.4vw,34px);top:clamp(12px,2vw,26px)}
+  .tr{position:absolute;right:clamp(14px,2.4vw,34px);top:clamp(12px,2vw,26px);text-align:right}
+  .bl{position:absolute;left:clamp(14px,2.4vw,34px);bottom:clamp(12px,2vw,26px)}
+  .br{position:absolute;right:clamp(14px,2.4vw,34px);bottom:clamp(12px,2vw,26px);text-align:right}
+  .k{font-size:clamp(10px,.82vw,13px);letter-spacing:.1em;color:var(--dim);line-height:1.85}
+  .k b{color:#e7eef4;font-weight:400} .k .a{color:var(--amber)}
+  .k .g{color:var(--green)} .k .r{color:#e2705a}
+  .phase{font-size:clamp(15px,1.5vw,22px);color:var(--amber);letter-spacing:.06em}
+  .order{font-size:clamp(12px,1.05vw,16px);color:#cfd8e0;max-width:32ch;line-height:1.5;
+    text-shadow:0 1px 4px rgba(7,10,15,.95)}
+  #card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(5,7,11,.86);transition:opacity .5s ease;z-index:5}
+  #card.gone{opacity:0;pointer-events:none}
+  .cardin{max-width:min(760px,86vw)}
+  .cardin h1{font-size:clamp(28px,4.2vw,60px);margin:0 0 .3em;font-weight:400;color:#f2f6f9}
+  .cardin p{font-size:clamp(12px,1.12vw,17px);line-height:1.62;color:#c7d1da;margin:.5em 0}
+  .cardin .src{font-size:clamp(10px,.86vw,13px);color:var(--dim);line-height:1.7;margin-top:1.1em}
+  .cardin .go{margin-top:1.3em;color:var(--amber);font-size:clamp(12px,1.1vw,16px)}
+</style>
+<canvas id="sea"></canvas>
+<div class="plate">
+  <div class="tl"><div class="phase" id="phase"></div><div class="order k" id="order"></div></div>
+  <div class="tr k" id="nav"></div>
+  <div class="bl k" id="sail"></div>
+  <div class="br k" id="cargo"></div>
+</div>
+<div id="card"><div class="cardin" id="cardin"></div></div>
+<audio id="theme" src="theme.m4a" loop preload="auto"></audio>
+
+<script type="module">
+import * as G from "./gate.js";
+import { makeVessel, step, drawVessel, CAPACITY, degOf, norm } from "./vessel.js";
+import { KN, rockShape } from "./cove.js";
+
+const cv = document.getElementById("sea"), ctx = cv.getContext("2d", {alpha:false});
+let W=0,H=0;
+function resize(){ const d=Math.min(devicePixelRatio||1,2);
+  W=Math.max(320,innerWidth);H=Math.max(240,innerHeight);cv.width=W*d;cv.height=H*d;ctx.setTransform(d,0,0,d,0,0); }
+addEventListener("resize",resize); resize();
+
+const C = { timber:"#c8781f", timberLit:"#f2a63c", foam:"#cfdae2", canvas:"#8d97a2" };
+const cam = { x:-4600, y:-500, span:1500 };
+const T = { X:x=>(x-cam.x)*T.k+W/2, Y:y=>(y-cam.y)*T.k+H/2, S:v=>v*T.k, k:1 };
+// The Gate is 1,830 yards from Fort Point to Lime Point, so the view has to
+// be wider than that or you are in the middle of a mile of fog with nothing
+// to steer by, which is authentic and unplayable.
+const SPAN = { brief:700, gate:640, bay:700, city:560, berth:400, over:520, wrecking:340 };
+
+// -------------------------------------------------- environment, 1905
+// Summer fog in the Gate, at night, with no rain in it: the fog comes in on
+// the north-west wind and lies on the water. You see lights before you see
+// land, which is the whole reason the lights are where they are.
+// The course in is about ESE. A wind from within four points of that, on top
+// of a foul tide, leaves you unable to move at all, which is not difficulty,
+// it is a dead end. So the wind is drawn from anywhere EXCEPT the arc dead
+// on the nose, and the tide is capped well below her best speed.
+// The bearing you actually need to make, which moves as you get on.
+function courseNow(){
+  const tgt = (phase === "gate") ? G.LIME_POINT
+            : (phase === "bay")  ? G.ALCATRAZ : G.BERTH;
+  return (Math.atan2(tgt.x - ship.x, -(tgt.y - ship.y)) * 180/Math.PI + 360) % 360;
+}
+// A wind is allowed to be anything except dead on the nose of that course.
+// She cannot sail within four points, so a wind inside that arc, on top of a
+// tide, is not difficulty: it is a dead end. The wind SHIFTS through the
+// passage, it just never shifts into the one place that stops you.
+// In the bay the wind is FAIR. Not merely legal: fair. It blows broadly the
+// way you have to go, so you are reaching or running, not crawling. This leg
+// is about seeing, not about sailing, and a foul wind in a fog just makes it
+// slow. It still shifts, it still gusts, it is just never against you.
+function legalWind(w, course){
+  const downwind = (course + 180) % 360;                   // wind from ASTERN
+  const off = ((w - downwind + 540) % 360) - 180;
+  const MAXOFF = 62;                                       // up to a beam wind
+  if (Math.abs(off) <= MAXOFF) return w;
+  return (downwind + (off >= 0 ? MAXOFF : -MAXOFF) + 360) % 360;
+}
+function fairWind(){ return legalWind(Math.random()*360, 110); }
+let windShiftIn = 18 + Math.random()*22;
+function windStep(dt){
+  windShiftIn -= dt;
+  if (windShiftIn <= 0){
+    windShiftIn = 18 + Math.random()*26;
+    env.windWant = (env.windFrom + (Math.random()-.5)*54 + 360) % 360;
+    env.gustWant = 9 + Math.random()*11;
+  }
+  const course = courseNow();
+  const want = legalWind(env.windWant ?? env.windFrom, course);
+  // and keep the CURRENT wind legal as the course swings round under you
+  const now = legalWind(env.windFrom, course);
+  let diff = ((want - now + 540) % 360) - 180;
+  env.windFrom = (now + diff * Math.min(1, dt*.35) + 360) % 360;
+  if (env.gustWant) env.windKn += (env.gustWant - env.windKn) * Math.min(1, dt*.2);
+}
+const env = {
+  t: 0, windFrom: fairWind(), windKn: 12 + Math.random()*8,
+  curX: 0, curY: 0, swell: .16, swellDir: 250, swellRate: .5,
+  flood: Math.random() < .5,            // the Gate runs one way or the other
+  tide: 0, fog: .46,
+};
+// The tidal stream through the Gate is the strongest thing in this game.
+// It runs to six knots at springs in the narrows and falls away in the bay.
+function weatherStep(dt){
+  env.t += dt; env.tide += dt*.05;
+  windStep(dt);     // and it turns, so waiting is a tactic
+  const [fx, fy] = [G.FORT_POINT.x, G.FORT_POINT.y];
+  const d = Math.hypot(ship.x-fx, ship.y-fy);
+  const strength = (1.1 + .9*Math.sin(env.tide)) * Math.exp(-((d/1500)**2));
+  const axis = 108 * Math.PI/180;             // the channel runs ESE-WNW
+  // The tide is atmosphere here, not the obstacle. The obstacle is that you
+  // cannot see. Aodhan's call, 2026-09-22: the San Francisco leg is about
+  // limited visibility and dodging what comes out of it.
+  const kn = strength * (env.flood ? 1.9 : -1.7);
+  env.curX = Math.sin(axis)*kn*KN;
+  env.curY = -Math.cos(axis)*kn*KN;
+  env.setKn = Math.abs(kn);
+}
+
+// One audio context for the lot, created when the game starts, so the horn
+// and the bell are not at the mercy of per-element autoplay rules.
+let A = null, bellBuf = null, hornBuf = null, muted = false;
+async function loadClip(url){
+  try { const r = await fetch(url); return await A.decodeAudioData(await r.arrayBuffer()); }
+  catch(e){ return null; }
+}
+function audioInit(){
+  if (A) return;
+  try { A = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return; }
+  if (A.state === "suspended") A.resume().catch(()=>{});
+  loadClip("bell.m4a").then(b => { bellBuf = b;
+    window.__sfxLog.push(b ? "bell loaded" : "BELL FAILED TO LOAD"); });
+  loadClip("foghorn.m4a").then(b => { hornBuf = b;
+    window.__sfxLog.push(b ? "foghorn loaded" : "FOGHORN FAILED TO LOAD"); });
+}
+// Nothing sounds in the first moment of a run, and everything that does
+// sound is logged, so a stray noise can be named instead of guessed at.
+let sfxOpen = 0;
+window.__sfxLog = [];
+function playClip(buf, vol, tag){
+  if (performance.now() < sfxOpen) return;
+  window.__sfxLog.push((tag||"clip") + " @" + Math.round(performance.now()/100)/10 + "s");
+  if (window.__sfxLog.length > 60) window.__sfxLog.shift();
+  if (!A || !buf || muted) return;
+  if (A.state === "suspended") A.resume().catch(()=>{});
+  const src = A.createBufferSource(); src.buffer = buf;
+  const g = A.createGain(); g.gain.value = vol;
+  src.connect(g); g.connect(A.destination);
+  src.start();
+}
+
+// SOUND IN THE FOG. Two things, and both of them sparing.
+//
+// THE FOG SIGNALS. In 1905 Point Bonita, Lime Point, Fort Point and Alcatraz
+// all had them, and in a fog they were the only thing telling you where the
+// land was. A blast carries a long way and comes at long intervals, so it
+// gets one every minute or so, and quieter the further off you are from the
+// station that sounded it.
+const FOG_SIGNALS = [G.PT_BONITA, G.LIME_POINT, G.FORT_POINT, G.ALCATRAZ];
+let hornIn = 14 + Math.random()*18;
+function hornStep(dt){
+  hornIn -= dt;
+  if (hornIn > 0) return;
+  // Aodhan's call: KEEP IT RARE. A real signal sounded every half minute,
+  // but on a leg this long that becomes wallpaper and stops meaning anything.
+  // Once every minute or two lands better: you notice each one.
+  hornIn = 62 + Math.random()*58;
+  let d = 1e9;
+  for (const f of FOG_SIGNALS) d = Math.min(d, Math.hypot(ship.x-f.x, ship.y-f.y));
+  playClip(hornBuf, Math.max(.45, Math.min(1.2, (1 - Math.min(1, d/1600)) * .85 + .45)), "foghorn");
+}
+
+// THE BELL BUOYS at the entrance. Rarely, and only within hearing.
+let bellIn = 6 + Math.random()*8;
+function bellStep(dt){
+  bellIn -= dt;
+  if (bellIn > 0) return;
+  bellIn = 18 + Math.random()*22;
+  // the entrance marks, and the buoy on Mile Rocks: a bell buoy on a danger
+  // is the one you are listening for
+  let d = 1e9;
+  for (const b of G.APPROACH_MARKS) d = Math.min(d, Math.hypot(ship.x-b.x, ship.y-b.y));
+  for (const h of G.HAZARDS) if (h.name === "MILE ROCKS")
+    d = Math.min(d, Math.hypot(ship.x-h.x, ship.y-h.y));
+  const REACH = 460;
+  if (d > REACH) return;
+  playClip(bellBuf, Math.max(.3, Math.min(1.3, (1 - d/REACH) * 1.1 + .3)), "bell");
+}
+
+// -------------------------------------------------------------- state
+let ship = makeVessel(G.PT_BONITA.x - 260, G.PT_BONITA.y + 240, 80);
+ship.cargo = Number(new URLSearchParams(location.search).get("cargo") || 46);
+ship.canvas = .6;
+let phase = "brief", elapsed = 0, hitBy = null;
+// A tug. Sailing vessels were towed through this Gate every day of the week,
+// and taking one is the honest answer to a foul wind and a foul tide. It is
+// not free: the towage comes off what the cargo made.
+let tow = false, tows = 0;
+let dev = false;   // backtick: fly her about, ignoring wind and weather
+const keys = {};
+const el = id => document.getElementById(id);
+
+function card(h){ el("cardin").innerHTML = h; el("card").classList.remove("gone"); }
+
+addEventListener("keydown", e=>{
+  const k = e.key.toLowerCase(); keys[k]=true;
+  if (k==="enter"){ if(phase==="brief") begin(); else if(phase==="over") location.reload(); }
+  if (k===" "){ e.preventDefault(); if (phase==="berth" && canMoor) unload(); }
+  if (k==="t" && (phase==="gate"||phase==="bay"||phase==="city"||phase==="berth")){
+    tow = !tow; if (tow) tows++;
+  }
+  // DEV MODE. Backtick: she answers the helm at once, drives wherever you
+  // point her whatever the wind is doing, and goes at four times her best
+  // speed. For getting to the part you want to look at.
+  if (k==="`" || k==="~"){ dev = !dev; }
+  if (k==="m"){ muted = !muted; el("theme").muted = muted; }
+  if (k==="escape") location.href = "index.html";
+});
+addEventListener("keyup", e=>{ keys[e.key.toLowerCase()]=false; });
+
+function begin(){ el("card").classList.add("gone"); phase="gate"; audioInit();
+  sfxOpen = performance.now() + 2500;
+  const a=el("theme"); a.volume=0; a.play().then(()=>{
+    const f=setInterval(()=>{a.volume=Math.min(.34,a.volume+.02); if(a.volume>=.42)clearInterval(f);},120);
+  }).catch(()=>{}); }
+
+card(`<h1>The run to market</h1>
+<p><b>Outside the Gate, a night in 1905.</b> You have your cargo out of Fort Ross
+and eighty miles of coast behind you. San Francisco is up the bay, and between
+you and it is the Golden Gate in a summer fog.</p>
+<p>Point Bonita light is fine on your bow. <b>Mile Rocks has no light on it</b>
+and will not have one until next year. The tide runs through the narrows at
+four knots and more, and it will take you where it likes if you let it.</p>
+<p>Inside, the bay is full of ferries that will not give way to a schooner.
+Get up to the Steuart Street lumber wharf and unload.</p>
+<p class="src">&larr; &rarr; helm &nbsp;&middot;&nbsp; &uarr;&darr; canvas
+&nbsp;&middot;&nbsp; space to make fast when you are alongside<br>
+<b>M</b> mutes &nbsp;&middot;&nbsp; <b>Esc</b> back to the title screen<br>
+<b>&#96;</b> is a dev mode: no wind, no tide, nothing can hurt you, four times
+her speed, for getting straight to the bit you want to look at.<br>
+<b>T takes a tug.</b> Sailing vessels were towed through this Gate every day; it is
+no disgrace, but the towage comes off what the cargo made. The tide turns as you
+go, so waiting for it is also an answer.</p>
+<div class="go">Enter to begin</div>`);
+
+// ------------------------------------------------------------ traffic
+const traffic = [];
+// ⚠ A simplified coastline will always leave some real place on the wrong
+// side of the line. Rather than hand-tune the outline forever, every fixed
+// work ashore is SETTLED at load: if it comes out in the water, it is walked
+// to the nearest land and set a little way in from the edge. The shift is
+// tens of yards, so the geography is unchanged, but nothing that belongs on
+// land is left standing in the sea. Lighthouses are exempt: they sit at the
+// water's edge by definition, which is the whole point of a lighthouse.
+function settle(o, inset){
+  if (onLand(o.x, o.y)) return o;
+  let best = null, bestD = 1e9;
+  for (let r = 15; r <= 420; r += 15){
+    for (let k = 0; k < 24; k++){
+      const th = k * Math.PI / 12;
+      const x = o.x + Math.cos(th)*r, y = o.y + Math.sin(th)*r;
+      if (!onLand(x, y)) continue;
+      if (r < bestD){ bestD = r; best = { x, y, th }; }
+    }
+    if (best) break;
+  }
+  if (!best) return o;
+  // step a little further in, so it is not sitting on the line
+  o.x = best.x + Math.cos(best.th) * inset;
+  o.y = best.y + Math.sin(best.th) * inset;
+  if (!onLand(o.x, o.y)){ o.x = best.x; o.y = best.y; }
+  return o;
+}
+for (const b of G.BATTERIES) settle(b, 22);
+for (const b of G.BUILDINGS) settle(b, 26);
+settle(G.FORT_POINT, 10);
+settle(G.FORT_MASON, 18);
+
+clipLanes();
+
+// Four of the vessels lying in the stream had been laid down on rock or too
+// near the beach. Rather than drop them and lose the traffic, shift each one
+// out to the nearest clear water: a master picking a berth would have done
+// exactly that.
+const ANCHORAGE = G.ANCHORED.map(a => {
+  if (!tooNearLand(a.x, a.y, 30)) return { x: a.x, y: a.y };
+  for (let r = 25; r <= 400; r += 25){
+    for (let k = 0; k < 16; k++){
+      const th = k * Math.PI / 8;
+      const x = a.x + Math.cos(th)*r, y = a.y + Math.sin(th)*r;
+      if (!tooNearLand(x, y, 30)) return { x, y };
+    }
+  }
+  return null;
+}).filter(Boolean);
+for (const lane of G.LANES){
+  if (lane.dead) continue;              // that route has no water in it
+  for (let i=0;i<lane.n;i++){
+    // spaced evenly down her lane, so none of them starts inside another
+    const f = (i + .5) / lane.n;
+    traffic.push({ lane, s: lane.s0 + (lane.s1 - lane.s0) * f,
+      dir: i % 2 ? -1 : 1,
+      sp: lane.speed*(.85+Math.random()*.3), kind: lane.kind, name: lane.name,
+      len: lane.len || 60, seen: 0, sx: 0, sy: 0, wait: 0, held: false,
+      x: lane.pts[0].x, y: lane.pts[0].y, hdg: 0 });
+  }
+}
+// Lanes were drawn between two points and some of them ran straight over
+// the Presidio. Each lane is sampled once at load and clipped to the water,
+// so nothing sails across the land any more.
+// Not just "is this point ashore" but "is this point CLEAR of the shore".
+// A lane that ends on the beach puts a ferry's bow in the sand and she then
+// appears to come out of the land, which is what Aodhan saw.
+// Land AND rock. A ferry master knew where Mile Rocks was better than you
+// did; he was not going to run his boat over it because a lane on a diagram
+// happened to pass that way.
+// var, deliberately: clipLanes() runs at module level ABOVE this line, and a
+// let or const here would still be in its temporal dead zone when it does
+var ALL_HAZARDS = null;
+function hazards(){
+  if (!ALL_HAZARDS) ALL_HAZARDS = G.HAZARDS.concat(G.SHORE_ROCKS);
+  return ALL_HAZARDS;
+}
+function tooNearLand(x, y, clear){
+  if (onLand(x, y)) return true;
+  for (let a = 0; a < 8; a++){
+    const th = a * Math.PI / 4;
+    if (onLand(x + Math.cos(th)*clear, y + Math.sin(th)*clear)) return true;
+  }
+  for (const h of hazards()){
+    const d = Math.hypot(x - h.x, y - h.y);
+    if (d < h.r + clear * .8) return true;
+  }
+  return false;
+}
+// Each lane is a polyline. Measure it once, and clip only the SEAWARD end if
+// it runs into anything; the slip end is a pen built for her and is exempt.
+function laneGeom(lane){
+  lane.seg = []; lane.total = 0;
+  for (let i=0;i<lane.pts.length-1;i++){
+    const a2=lane.pts[i], b2=lane.pts[i+1];
+    const L=Math.hypot(b2.x-a2.x, b2.y-a2.y);
+    lane.seg.push({a:a2,b:b2,L,s0:lane.total});
+    lane.total += L;
+  }
+}
+function laneAt(lane, s){
+  s = Math.max(0, Math.min(lane.total, s));
+  for (const g of lane.seg){
+    if (s <= g.s0 + g.L || g === lane.seg[lane.seg.length-1]){
+      const f = g.L ? (s - g.s0)/g.L : 0;
+      const nx = g.L ? (g.b.y-g.a.y)/g.L : 0, ny = g.L ? -(g.b.x-g.a.x)/g.L : 0;
+      return { x: g.a.x + (g.b.x-g.a.x)*f, y: g.a.y + (g.b.y-g.a.y)*f,
+               hdg: Math.atan2(g.b.x-g.a.x, -(g.b.y-g.a.y)), nx, ny };
+    }
+  }
+  return { x: lane.pts[0].x, y: lane.pts[0].y, hdg: 0 };
+}
+function clipLanes(){
+  for (const lane of G.LANES){
+    laneGeom(lane);
+    const clear = Math.max(26, (lane.len || 60) * .55);
+    const skip = lane.slip !== undefined ? 90 : 0;   // her own slip and its mouth
+    // ⚠ ORDER MATTERS. Find where the water STARTS first, then run on from
+    // there to where it ends. Scanning for the end first broke four lanes:
+    // their first waypoint was inside the clearance, so the scan stopped at
+    // zero and the run came out empty.
+    lane.s0 = skip;
+    while (lane.s0 < lane.total){
+      const p2 = laneAt(lane, lane.s0);
+      if (!tooNearLand(p2.x, p2.y, clear)) break;
+      if (lane.slip !== undefined) break;         // her own pen is not a hazard
+      lane.s0 += 6;
+    }
+    lane.s1 = lane.total;
+    for (let s = lane.s0 + 6; s <= lane.total; s += 6){
+      const p2 = laneAt(lane, s);
+      if (tooNearLand(p2.x, p2.y, clear)){ lane.s1 = s - 6; break; }
+    }
+    while (lane.s1 > lane.s0){
+      const p2 = laneAt(lane, lane.s1);
+      if (!tooNearLand(p2.x, p2.y, clear)) break;
+      lane.s1 -= 6;
+    }
+    lane.dead = lane.s1 - lane.s0 < 80;
+  }
+}
+
+// You know where a vessel is only if you have SEEN her: inside your own
+// circle, or lit up in the pool of a lighthouse. After that the chart holds
+// her last known position, and that goes stale.
+function spotting(dt){
+  const near = 300 / Math.max(.15, 1);
+  for (const v of traffic){
+    const d3 = Math.hypot(v.x - ship.x, v.y - ship.y);
+    let lit = false;
+    if (d3 < 760){
+      for (const L of G.LIGHTS){
+        if (Math.hypot(v.x - L.x, v.y - L.y) < L.range * G.COMPRESS * .62){ lit = true; break; }
+      }
+    }
+    if (d3 < near || lit){ v.seen = 1; v.sx = v.x; v.sy = v.y; }
+    else v.seen = Math.max(0, v.seen - dt * .05);        // the contact goes stale
+  }
+}
+// NOTHING OVERLAPS ANYTHING. Every vessel looks at every other, and if she
+// would close inside their two half-lengths she stops until it is clear. The
+// lower-numbered vessel has the right of way, so two of them cannot both
+// stand still waiting for the other.
+// NOTHING OVERLAPS ANYTHING, and it is done in two passes so that no vessel
+// can move into the space another is about to leave or occupy.
+//
+// Two rules do the work:
+//  1. KEEP TO YOUR OWN SIDE. A vessel outbound on a lane rides a little to
+//     one side of it and an inbound vessel to the other, so they pass port
+//     to port the way they are supposed to and never meet head on.
+//  2. GIVE WAY. Before she moves, each vessel tests her INTENDED position
+//     against everybody else's intended position. If she would close inside
+//     their two half-lengths she stops; the tie goes to the lower number, so
+//     they cannot both stand there waiting for the other.
+// distance between two line segments, so two vessels passing side by side
+// are judged on how far apart their HULLS are and not on their lengths
+function segSeg(ax,ay,bx,by, cx,cy,dx,dy){
+  const d1x=bx-ax, d1y=by-ay, d2x=dx-cx, d2y=dy-cy;
+  const r1=ax-cx, r2=ay-cy;
+  const a=d1x*d1x+d1y*d1y, e=d2x*d2x+d2y*d2y, f=d2x*r1+d2y*r2;
+  let s1=0, t1=0;
+  const c=d1x*r1+d1y*r2, b=d1x*d2x+d1y*d2y;
+  const den=a*e-b*b;
+  if (den > 1e-9) s1 = Math.max(0, Math.min(1, (b*f-c*e)/den));
+  t1 = (b*s1+f)/(e||1);
+  t1 = Math.max(0, Math.min(1, t1));
+  s1 = Math.max(0, Math.min(1, (b*t1-c)/(a||1)));
+  const px=ax+d1x*s1-(cx+d2x*t1), py=ay+d1y*s1-(cy+d2y*t1);
+  return Math.hypot(px,py);
+}
+function hullGap(v, ox, oy, ohdg, olen, vx, vy, vhdg){
+  const h1=vlen2(v.len), h2=vlen2(olen);
+  const a1x=vx+Math.sin(vhdg)*h1, a1y=vy-Math.cos(vhdg)*h1;
+  const a2x=vx-Math.sin(vhdg)*h1, a2y=vy+Math.cos(vhdg)*h1;
+  const b1x=ox+Math.sin(ohdg)*h2, b1y=oy-Math.cos(ohdg)*h2;
+  const b2x=ox-Math.sin(ohdg)*h2, b2y=oy+Math.cos(ohdg)*h2;
+  return segSeg(a1x,a1y,a2x,a2y, b1x,b1y,b2x,b2y);
+}
+const vlen2 = L => L*.42;                    // half her length, less the ends
+function beamOf(L){ return L*.24; }
+
+function placeOn(lane, s, dir, len){
+  const p = laneAt(lane, s);
+  const off = (dir > 0 ? 1 : -1) * (12 + len * .20);
+  return { x: p.x + p.nx*off, y: p.y + p.ny*off,
+           hdg: p.hdg + (dir < 0 ? Math.PI : 0) };
+}
+function trafficStep(dt){
+  // pass one: where would each of them like to be?
+  for (const v of traffic){
+    if (v.wait > 0){ v.wait -= dt; v.ns = v.s; continue; }
+    v.ns = v.s + v.dir * (v.sp * KN * 7) * dt;
+    if (v.ns > v.lane.s1 || v.ns < v.lane.s0) v.ns = v.s;   // resolved below
+    const p = placeOn(v.lane, v.ns, v.dir, v.len);
+    v.px = p.x; v.py = p.y;
+  }
+  // pass two: who has to stand on?
+  for (let i=0;i<traffic.length;i++){
+    const v = traffic[i];
+    if (v.wait > 0){ v.held = true; continue; }
+    let hold = false;
+    for (let j=0;j<traffic.length && !hold;j++){
+      if (j === i) continue;
+      const o = traffic[j];
+      const room = (beamOf(v.len) + beamOf(o.len)) * .5 + 26;
+      const then = hullGap(v, o.px, o.py, o.hdg, o.len, v.px, v.py, v.hdg);
+      if (then > room) continue;
+      const now = hullGap(v, o.x, o.y, o.hdg, o.len, v.x, v.y, v.hdg);
+      if (then < now || j < i) hold = true;
+    }
+    v.held = hold;
+    if (hold) continue;
+    v.s = v.s + v.dir * (v.sp * KN * 7) * dt;
+    if (v.s > v.lane.s1){ v.s = v.lane.s1; v.dir = -1; v.wait = 2 + Math.random()*3; }
+    if (v.s < v.lane.s0){ v.s = v.lane.s0; v.dir = 1;
+      if (v.lane.slip !== undefined) v.wait = 4 + Math.random()*5; }
+  }
+  // and put them where they ended up
+  for (const v of traffic){
+    const p = placeOn(v.lane, v.s, v.dir, v.len);
+    v.x = p.x; v.y = p.y; v.hdg = p.hdg;
+  }
+  // A last guarantee. If two hulls are still inside each other after all
+  // that, back the higher-numbered one down her own lane until she is clear.
+  // Prediction can be beaten by a long frame; this cannot.
+  for (let pass=0; pass<5; pass++){
+    let fixed = false;
+    for (let i=0;i<traffic.length;i++){
+      const v = traffic[i];
+      for (let j=0;j<i;j++){
+        const o = traffic[j];
+        const room = (beamOf(v.len) + beamOf(o.len)) * .5 + 22;
+        if (hullGap(v, o.x, o.y, o.hdg, o.len, v.x, v.y, v.hdg) >= room) continue;
+        for (let back=0; back<14; back++){
+          v.s -= v.dir * 6;
+          if (v.s < v.lane.s0) v.s = v.lane.s0;
+          if (v.s > v.lane.s1) v.s = v.lane.s1;
+          const p = placeOn(v.lane, v.s, v.dir, v.len);
+          v.x = p.x; v.y = p.y; v.hdg = p.hdg;
+          if (hullGap(v, o.x, o.y, o.hdg, o.len, v.x, v.y, v.hdg) >= room) break;
+        }
+        v.held = true; fixed = true;
+      }
+    }
+    if (!fixed) break;
+  }
+}
+
+function inPoly(x, y, pts, closeTo){
+  const all = pts.concat(closeTo);
+  let inside = false;
+  for (let i = 0, j = all.length - 1; i < all.length; j = i++){
+    const xi = all[i][0], yi = all[i][1], xj = all[j][0], yj = all[j][1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function onLand(x, y){
+  if (inPoly(x, y, G.MARIN, [[-9000,-14000],[14000,-14000]])) return "the Marin shore";
+  if (inPoly(x, y, G.CITY,  [[14000,14000],[-9000,14000]]))   return "the city shore";
+  for (const is of G.ISLANDS){
+    let inside = false;
+    const P = is.poly;
+    for (let i = 0, j = P.length - 1; i < P.length; j = i++){
+      if ((P[i][1] > y) !== (P[j][1] > y) &&
+          x < (P[j][0]-P[i][0]) * (y-P[i][1]) / (P[j][1]-P[i][1]) + P[i][0]) inside = !inside;
+    }
+    if (inside) return is.name;
+  }
+  return null;
+}
+
+function rnd2(i){ let s2=(i*1103515245+12345)>>>0; s2=(s2^(s2>>>15))>>>0; return (s2%100000)/100000; }
+function drawSwell(t){
+  const a=(env.swellDir+90)*Math.PI/180, ux=Math.cos(a), uy=Math.sin(a);
+  const px=-uy, py=ux, gap=60, len=Math.max(W,H)*1.6/T.k;
+  const phase2=(t*22)%gap;
+  ctx.save(); ctx.strokeStyle="rgba(180,202,220,.06)";
+  ctx.lineWidth=Math.max(1,T.S(2.4));
+  const n=Math.ceil(Math.max(W,H)/T.k/gap)+3;
+  const base=Math.round((cam.x*px+cam.y*py)/gap)*gap;
+  for(let i=-n;i<n;i++){
+    const d2=base+i*gap+phase2, bx=px*d2, by=py*d2;
+    ctx.beginPath();
+    ctx.moveTo(T.X(bx-ux*len),T.Y(by-uy*len));
+    ctx.lineTo(T.X(bx+ux*len),T.Y(by+uy*len));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawFlecks(t){
+  const cell=30, hw=W/2/T.k, hh=H/2/T.k;
+  const i0=Math.floor((cam.x-hw)/cell), i1=Math.ceil((cam.x+hw)/cell);
+  const j0=Math.floor((cam.y-hh)/cell), j1=Math.ceil((cam.y+hh)/cell);
+  if ((i1-i0)*(j1-j0)>4000) return;
+  ctx.fillStyle="#b9d2e4";
+  for(let j=j0;j<=j1;j++) for(let i=i0;i<=i1;i++){
+    const h=(((i*73856093)^(j*19349663))>>>0);
+    const fx=i*cell+(h%997)/997*cell, fy=j*cell+((h>>10)%991)/991*cell;
+    ctx.globalAlpha=.04+.13*Math.max(0,Math.sin(t*1.1+(h%628)/100));
+    ctx.fillRect(T.X(fx),T.Y(fy),Math.max(1.2,T.S(3)),Math.max(1,T.S(1)));
+  }
+  ctx.globalAlpha=1;
+}
+const wake=[]; let wakeT=0;
+function wakeStep(dt){
+  wakeT-=dt;
+  if (wakeT<=0 && ship.speedKn>.7){ wakeT=.09;
+    wake.push({x:ship.x+(Math.random()-.5)*5,y:ship.y+(Math.random()-.5)*5,
+               a:Math.min(1,ship.speedKn/5),r:1.2+Math.random()*2}); 
+    if (wake.length>110) wake.shift(); }
+  for(const w of wake){ w.a-=dt*.42; w.x+=env.curX*dt; w.y+=env.curY*dt; }
+  while(wake.length && wake[0].a<=0) wake.shift();
+}
+function drawWake(){
+  for(const w of wake){
+    const age=1-Math.max(0,w.a), r=w.r*(1+age*2.4);
+    ctx.globalAlpha=Math.max(0,w.a)*.2; ctx.fillStyle="#0c161d";
+    ctx.beginPath(); ctx.ellipse(T.X(w.x),T.Y(w.y),T.S(r),T.S(r*.72),0,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=Math.max(0,w.a)*.14*(1-age); ctx.strokeStyle="#cfe6f4";
+    ctx.lineWidth=Math.max(1,T.S(.5));
+    ctx.beginPath(); ctx.ellipse(T.X(w.x),T.Y(w.y),T.S(r*.8),T.S(r*.55),0,0,Math.PI*2); ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+}
+
+trafficStep(0);
+
+function landPoly(pts, closeTo){
+  ctx.beginPath();
+  ctx.moveTo(T.X(pts[0][0]), T.Y(pts[0][1]));
+  for (const [x,y] of pts) ctx.lineTo(T.X(x), T.Y(y));
+  for (const [x,y] of closeTo) ctx.lineTo(T.X(x), T.Y(y));
+  ctx.closePath();
+}
+function hills(clipPts, closeTo, seed){
+  ctx.save(); landPoly(clipPts, closeTo); ctx.clip();
+  for (let i=0;i<300;i++){
+    const r0=rnd2(i*3+seed), r1=rnd2(i*3+1+seed), r2=rnd2(i*3+2+seed);
+    const x = -7000 + r0*17000, y = -9000 + r1*11000;
+    const R = 180 + r2*520;
+    if (!onScreen(x, y, T.S(R) + 40)) continue;
+    ctx.fillStyle = r2>.5 ? "rgba(44,56,44,.5)" : "rgba(26,36,30,.5)";
+    ctx.beginPath(); ctx.ellipse(T.X(x),T.Y(y),T.S(R),T.S(R*.72),0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawShores(){
+  ctx.fillStyle = "#1b2a24";
+  landPoly(G.MARIN, [[-9000,-14000],[14000,-14000]]);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(206,222,236,.65)"; ctx.lineWidth = Math.max(1.4,T.S(2.2)); ctx.stroke();
+  hills(G.MARIN, [[-9000,-14000],[14000,-14000]], 11);
+  // a pale strand where the coves are, and the bluff edge above it
+  ctx.save(); landPoly(G.MARIN, [[-9000,-14000],[14000,-14000]]); ctx.clip();
+  ctx.strokeStyle="rgba(120,112,92,.5)"; ctx.lineWidth=Math.max(1.5,T.S(4));
+  ctx.beginPath();
+  for (let i=0;i<G.MARIN.length;i++){
+    const q=G.MARIN[i];
+    if (i===0) ctx.moveTo(T.X(q[0]),T.Y(q[1])); else ctx.lineTo(T.X(q[0]),T.Y(q[1]));
+  }
+  ctx.stroke();
+  ctx.restore();
+  landPoly(G.CITY, [[14000,14000],[-9000,14000]]);
+  ctx.fillStyle = "#23271f"; ctx.fill(); ctx.stroke();
+  hills(G.CITY, [[14000,14000],[-9000,14000]], 77);
+
+  // the city itself: a grid of lit windows behind the waterfront
+  ctx.save();
+  landPoly(G.CITY, [[14000,14000],[-9000,14000]]); ctx.clip();
+  for (let i=0;i<520;i++){
+    const r = (i*9301+49297)%233280/233280, r2=((i*7919)%10007)/10007;
+    const x = G.FORT_MASON.x + r*5200, y = G.FORT_MASON.y + 200 + r2*2600;
+    ctx.fillStyle = `rgba(255,198,120,${.1+.35*((i*37)%10)/10})`;
+    ctx.fillRect(T.X(x), T.Y(y), Math.max(1,T.S(9)), Math.max(1,T.S(7)));
+  }
+  ctx.restore();
+}
+function drawIslands(){
+  for (const is of G.ISLANDS){
+    ctx.beginPath();
+    ctx.moveTo(T.X(is.poly[0][0]), T.Y(is.poly[0][1]));
+    for (const [x,y] of is.poly) ctx.lineTo(T.X(x), T.Y(y));
+    ctx.closePath();
+    ctx.fillStyle = "#1e2724"; ctx.fill();
+    ctx.strokeStyle = "rgba(190,206,220,.55)"; ctx.lineWidth = Math.max(1.2,T.S(1.6));
+    ctx.stroke();
+    // relief on them, so they are hills and not flat cut-outs
+    ctx.save(); ctx.clip();
+    for (let i=0;i<40;i++){
+      const r0=rnd2(i*7+Math.round(is.c.x)), r1=rnd2(i*7+3+Math.round(is.c.x));
+      const R = 30 + r1*90;
+      ctx.fillStyle = r0>.5 ? "rgba(44,56,44,.5)" : "rgba(26,36,30,.5)";
+      ctx.beginPath();
+      ctx.ellipse(T.X(is.c.x + (r0-.5)*520), T.Y(is.c.y + (r1-.5)*460),
+                  T.S(R), T.S(R*.75), 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+    if (is.name === "Alcatraz"){                 // the citadel and its buildings
+      ctx.save(); ctx.translate(T.X(is.c.x), T.Y(is.c.y)); ctx.rotate(.5);
+      ctx.fillStyle = "#4a555d";
+      ctx.fillRect(T.S(-44), T.S(-13), T.S(88), T.S(26));
+      ctx.fillStyle = "rgba(255,198,120,.65)";
+      for (let i=0;i<6;i++) ctx.fillRect(T.S(-36+i*14), T.S(-4), T.S(5), T.S(5));
+      ctx.restore();
+    }
+    if (is.name === "Angel Island" && T.k > .25){
+      ctx.globalAlpha=.6; ctx.fillStyle="#b9c6d1";
+      ctx.font=`12px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign="center";
+      ctx.fillText("Angel Island", T.X(is.c.x), T.Y(is.c.y));
+      ctx.globalAlpha=1;
+    }
+  }
+}
+// Guns. The count and the type come off the battery's own record, so a
+// four-gun six-inch barbette has four barrels and a mortar battery has pits,
+// not barrels: mortars fire nearly straight up and sit down in the ground.
+function gunSpec(g){
+  const m = /(\d+)\s*x\s*([\d.]+)-in/.exec(g || "");
+  const n = m ? Math.min(8, parseInt(m[1],10)) : 2;
+  const cal = m ? parseFloat(m[2]) : 6;
+  const mortar = /mortar/i.test(g||"");
+  const disappearing = /disappearing/i.test(g||"");
+  return { n, cal, mortar, disappearing };
+}
+function drawBatteries(t){
+  for (const b of G.BATTERIES){
+    const x=T.X(b.x), y=T.Y(b.y);
+    if (x<-90||x>W+90||y<-90||y>H+90) continue;
+    const g = gunSpec(b.guns);
+    const w = 8 + g.n*5.5, h = 13;
+    ctx.save(); ctx.translate(x,y);
+    // Which way she faces. Not a guess: sweep the compass and take the
+    // bearing on which the water starts soonest. A battery whose parapet
+    // faces inland is a nonsense, and Fort Mason's was doing exactly that.
+    if (b.face === undefined){
+      let best = 1e9, bestA = 0;
+      for (let k = 0; k < 48; k++){
+        const th = k * Math.PI / 24;
+        for (let r = 20; r <= 600; r += 20){
+          if (!onLand(b.x + Math.cos(th)*r, b.y + Math.sin(th)*r)){
+            if (r < best){ best = r; bestA = th; }
+            break;
+          }
+        }
+      }
+      b.face = bestA;
+    }
+    ctx.rotate(b.face - Math.PI/2);          // the parapet lies across it
+    // the parapet. An earthwork is a bank of earth with a palisade along it;
+    // an Endicott battery is a slab of concrete. They should not look alike.
+    ctx.fillStyle="rgba(5,8,12,.55)";
+    ctx.fillRect(T.S(-w/2)+T.S(1.4), T.S(-h/2)+T.S(1.6), T.S(w), T.S(h));
+    if (b.earthwork){
+      ctx.fillStyle="#4a4e38";
+      ctx.beginPath();
+      ctx.moveTo(T.S(-w/2), T.S(h/2));
+      ctx.quadraticCurveTo(0, T.S(-h/2-2), T.S(w/2), T.S(h/2));
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle="rgba(190,200,170,.45)"; ctx.lineWidth=Math.max(1,T.S(.5));
+      ctx.stroke();
+      // the palisade along the top of the bank
+      ctx.strokeStyle="#6b5a3c"; ctx.lineWidth=Math.max(1,T.S(.7));
+      for (let i=0;i<=Math.round(w/2.2);i++){
+        const px = -w/2 + i*2.2;
+        const py = -h/2 + 1.2 + (px*px)/(w*w/4)*h*.7;
+        ctx.beginPath();
+        ctx.moveTo(T.S(px), T.S(py)); ctx.lineTo(T.S(px), T.S(py+2.6));
+        ctx.stroke();
+      }
+    } else {
+      ctx.fillStyle="#57616a";
+      ctx.fillRect(T.S(-w/2), T.S(-h/2), T.S(w), T.S(h));
+      ctx.fillStyle="#3d464e";
+      ctx.fillRect(T.S(-w/2), T.S(-h/2), T.S(w), T.S(h*.42));
+      ctx.strokeStyle="rgba(200,214,226,.5)"; ctx.lineWidth=Math.max(1,T.S(.5));
+      ctx.strokeRect(T.S(-w/2), T.S(-h/2), T.S(w), T.S(h));
+    }
+    // the emplacements
+    for (let i=0;i<g.n;i++){
+      const gx = -w/2 + (i+.5)*(w/g.n);
+      if (g.mortar){                                  // a pit, four to a pit
+        ctx.fillStyle="#22292f";
+        ctx.beginPath(); ctx.arc(T.S(gx), 0, Math.max(1.2,T.S(2.4)), 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle="#6d7780"; ctx.lineWidth=Math.max(1,T.S(.5));
+        ctx.beginPath(); ctx.arc(T.S(gx), 0, Math.max(1.2,T.S(2.4)), 0, Math.PI*2); ctx.stroke();
+      } else {
+        ctx.fillStyle="#2b333a";                      // the pit
+        ctx.beginPath(); ctx.arc(T.S(gx), T.S(1.4), Math.max(1.2,T.S(2.2)), 0, Math.PI*2); ctx.fill();
+        // the piece itself, run out over the parapet
+        const len = 3.4 + g.cal*.34;
+        ctx.strokeStyle="#1b2127";
+        ctx.lineWidth=Math.max(1.4, T.S(.5 + g.cal*.055));
+        ctx.beginPath();
+        ctx.moveTo(T.S(gx), T.S(1.4));
+        ctx.lineTo(T.S(gx), T.S(1.4 - len));
+        ctx.stroke();
+        if (g.disappearing){                          // its counterweight pit
+          ctx.strokeStyle="rgba(150,166,180,.45)"; ctx.lineWidth=Math.max(1,T.S(.4));
+          ctx.beginPath(); ctx.arc(T.S(gx), T.S(3.4), Math.max(1,T.S(1.5)), 0, Math.PI*2); ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+    if (T.k > .5){
+      ctx.globalAlpha=.55; ctx.fillStyle="#9fb0bd";
+      ctx.font = `${Math.max(9,Math.min(12,T.S(6)))}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign="center";
+      ctx.fillText(b.name, x, y - T.S(12));
+      ctx.globalAlpha=.4;
+      ctx.fillText(b.guns, x, y - T.S(4));
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+// the lighthouses as structures: a tower with a gallery, and the dwelling
+function drawLighthouses(){
+  for (const L of G.LIGHTS){
+    const x=T.X(L.x), y=T.Y(L.y);
+    if (x<-60||x>W+60||y<-60||y>H+60) continue;
+    if (L.name === "Fort Point") continue;            // hers sits on the fort
+    ctx.save();
+    // the keeper's dwelling
+    ctx.fillStyle="rgba(5,8,12,.5)";
+    ctx.fillRect(x+T.S(5), y+T.S(4), T.S(11), T.S(7));
+    ctx.fillStyle="#54606a";
+    ctx.fillRect(x+T.S(4), y+T.S(3), T.S(11), T.S(7));
+    ctx.fillStyle="rgba(255,214,150,.6)";
+    ctx.fillRect(x+T.S(6), y+T.S(5), T.S(2.2), T.S(1.8));
+    // the tower, and the gallery round the lantern
+    ctx.fillStyle="#7d8892";
+    ctx.beginPath(); ctx.arc(x, y, Math.max(2,T.S(3.4)), 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle="#c3ced8"; ctx.lineWidth=Math.max(1,T.S(.6));
+    ctx.beginPath(); ctx.arc(x, y, Math.max(3,T.S(4.8)), 0, Math.PI*2); ctx.stroke();
+    // Point Bonita's footbridge, which is the thing everyone remembers
+    if (L.name === "Point Bonita"){
+      ctx.strokeStyle="rgba(200,214,226,.6)"; ctx.lineWidth=Math.max(1,T.S(.6));
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x+T.S(9), y-T.S(11), x+T.S(20), y-T.S(8));
+      ctx.stroke();
+      ctx.lineWidth=Math.max(1,T.S(.4));
+      for (let i=1;i<5;i++){
+        const f=i/5, bx=x+T.S(20*f), by=y-T.S(16*f*(1-f)*2+8*f);
+        ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx,by+T.S(3)); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+}
+
+// Where you are bound: a lumber wharf on the Steuart Street front, with the
+// berth marked alongside it. It should be obvious and it should be easy.
+function drawWharf(t){
+  const w = G.WHARF;
+  ctx.save();
+  ctx.fillStyle="rgba(4,6,10,.6)";
+  ctx.fillRect(T.X(w.x)+T.S(3), T.Y(w.y)-T.S(w.wide/2)+T.S(3), T.S(w.len), T.S(w.wide));
+  ctx.fillStyle="#4b5259";
+  ctx.fillRect(T.X(w.x), T.Y(w.y)-T.S(w.wide/2), T.S(w.len), T.S(w.wide));
+  ctx.strokeStyle="rgba(20,26,32,.7)"; ctx.lineWidth=Math.max(1,T.S(.5));
+  for (let i=0;i<=14;i++){
+    ctx.beginPath();
+    ctx.moveTo(T.X(w.x+i*w.len/14), T.Y(w.y-w.wide/2));
+    ctx.lineTo(T.X(w.x+i*w.len/14), T.Y(w.y+w.wide/2));
+    ctx.stroke();
+  }
+  // lumber stacked the length of it, and the shed
+  for (let i=0;i<7;i++){
+    ctx.fillStyle = i%2 ? C.timber : C.timberLit;
+    ctx.fillRect(T.X(w.x+8+i*12), T.Y(w.y+2), T.S(9), T.S(5));
+  }
+  ctx.fillStyle="#59636b";
+  ctx.fillRect(T.X(w.x+w.len*.55), T.Y(w.y-9), T.S(34), T.S(13));
+  ctx.fillStyle="#67727b";
+  ctx.fillRect(T.X(w.x+w.len*.55), T.Y(w.y-9), T.S(34), T.S(6.5));
+  ctx.fillStyle="rgba(255,214,150,.7)";
+  ctx.fillRect(T.X(w.x+w.len*.6), T.Y(w.y-5), T.S(5), T.S(3));
+  // two lamps on the head, burning through it
+  for (const dy of [-w.wide/2, w.wide/2]){
+    const gg=ctx.createRadialGradient(T.X(w.x),T.Y(w.y+dy),0,T.X(w.x),T.Y(w.y+dy),Math.max(10,T.S(40)));
+    gg.addColorStop(0,"rgba(255,214,150,.65)"); gg.addColorStop(1,"rgba(255,214,150,0)");
+    ctx.fillStyle=gg; const rr=Math.max(10,T.S(40));
+    ctx.fillRect(T.X(w.x)-rr, T.Y(w.y+dy)-rr, rr*2, rr*2);
+  }
+  if (phase==="city" || phase==="berth" || phase==="bay"){
+    const pulse=.4+.3*Math.sin(t*2.2);
+    ctx.setLineDash([T.S(5),T.S(5)]);
+    ctx.strokeStyle=`rgba(242,166,60,${pulse})`;
+    ctx.lineWidth=Math.max(1.4,T.S(1.2));
+    ctx.beginPath();
+    ctx.arc(T.X(G.BERTH.x), T.Y(G.BERTH.y), T.S(G.BERTH.tol), 0, Math.PI*2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (T.k > .3){
+      ctx.globalAlpha=.8; ctx.fillStyle="#f2a63c";
+      ctx.font=`${Math.max(10,Math.min(14,T.S(9)))}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign="center";
+      ctx.fillText("the lumber wharf", T.X(G.BERTH.x), T.Y(G.BERTH.y)-T.S(G.BERTH.tol+8));
+      ctx.globalAlpha=1;
+    }
+  }
+  ctx.restore();
+}
+
+// Fort Point: a Third System casemated work. From above it is a SQUARE with
+// an open PARADE GROUND in the middle, casemate tiers on three faces looking
+// out over the water, the gorge wall and its entrance on the landward side,
+// and a stair tower at one corner. Not a filled rectangle.
+function drawFortPoint(){
+  const f = G.FORT_POINT, R = 52, WALL = 12;
+  ctx.save(); ctx.translate(T.X(f.x), T.Y(f.y)); ctx.rotate(.34);
+  // the counterscarp shadow
+  ctx.fillStyle="rgba(4,6,10,.6)";
+  ctx.fillRect(T.S(-R)+T.S(3), T.S(-R)+T.S(3), T.S(R*2), T.S(R*2));
+  // the mass of the work
+  ctx.fillStyle="#6b5a49";
+  ctx.fillRect(T.S(-R), T.S(-R), T.S(R*2), T.S(R*2));
+  ctx.strokeStyle="rgba(232,216,196,.55)"; ctx.lineWidth=Math.max(1,T.S(1));
+  ctx.strokeRect(T.S(-R), T.S(-R), T.S(R*2), T.S(R*2));
+  // the parade ground, open to the sky
+  ctx.fillStyle="#3b4436";
+  ctx.fillRect(T.S(-R+WALL), T.S(-R+WALL), T.S((R-WALL)*2), T.S((R-WALL)*2));
+  ctx.strokeStyle="rgba(20,24,20,.7)";
+  ctx.strokeRect(T.S(-R+WALL), T.S(-R+WALL), T.S((R-WALL)*2), T.S((R-WALL)*2));
+  // casemates: embrasures along the three seaward faces
+  ctx.fillStyle="#2c241c";
+  const n = 9;
+  for (let i=0;i<n;i++){
+    const t2 = -R + WALL*.5 + (i+.5)*(R*2 - WALL)/n;
+    ctx.fillRect(T.S(t2-3), T.S(-R+1.5), T.S(6), T.S(4));        // north face
+    ctx.fillRect(T.S(-R+1.5), T.S(t2-3), T.S(4), T.S(6));        // west face
+    ctx.fillRect(T.S(R-5.5), T.S(t2-3), T.S(4), T.S(6));         // east face
+  }
+  // the gorge: the landward wall, with the sally port in the middle of it
+  ctx.fillStyle="#5d4e40";
+  ctx.fillRect(T.S(-R), T.S(R-WALL), T.S(R*2), T.S(WALL));
+  ctx.fillStyle="#241c14";
+  ctx.fillRect(T.S(-7), T.S(R-WALL), T.S(14), T.S(WALL));
+  // the stair tower at the north-west angle, and the light on the wall
+  ctx.fillStyle="#7a6753";
+  ctx.fillRect(T.S(-R-5), T.S(-R-5), T.S(16), T.S(16));
+  ctx.fillStyle="rgba(255,232,184,.95)";
+  ctx.beginPath(); ctx.arc(T.S(R-6), T.S(-R+6), Math.max(2,T.S(3.4)), 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  if (T.k > .2){
+    ctx.globalAlpha=.8; ctx.fillStyle="#e2d8c8";
+    ctx.font=`${Math.max(10,Math.min(15,T.S(9)))}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign="center";
+    ctx.fillText("Fort Point", T.X(f.x), T.Y(f.y)-T.S(66)); ctx.globalAlpha=1;
+  }
+}
+
+function block(x, y, w, h, rot, lit){
+  ctx.save(); ctx.translate(T.X(x), T.Y(y)); ctx.rotate(rot||0);
+  ctx.fillStyle="rgba(5,8,12,.6)";
+  ctx.fillRect(T.S(-w/2)+T.S(1.5), T.S(-h/2)+T.S(1.8), T.S(w), T.S(h));
+  ctx.fillStyle="#3f4a53";
+  ctx.fillRect(T.S(-w/2), T.S(-h/2), T.S(w), T.S(h));
+  ctx.fillStyle="#4c5a64";
+  ctx.fillRect(T.S(-w/2), T.S(-h/2), T.S(w), T.S(h/2));
+  ctx.strokeStyle="rgba(180,196,210,.45)"; ctx.lineWidth=Math.max(1,T.S(.4));
+  ctx.beginPath(); ctx.moveTo(T.S(-w/2),0); ctx.lineTo(T.S(w/2),0); ctx.stroke();
+  if (lit !== false){
+    ctx.fillStyle="rgba(255,206,140,.8)";
+    const cols=Math.max(2,Math.round(w/9)), rows=Math.max(1,Math.round(h/10));
+    for(let i=0;i<cols;i++) for(let j=0;j<rows;j++){
+      if (((i*7+j*13)%3)===0) continue;
+      ctx.fillRect(T.S(-w/2+3+i*(w-6)/cols), T.S(-h/2+3+j*(h-6)/rows),
+                   Math.max(1,T.S(2.2)), Math.max(1,T.S(1.8)));
+    }
+  }
+  ctx.restore();
+}
+function CITYONLY(x,y){ return inPoly(x,y,G.CITY,[[14000,14000],[-9000,14000]]); }
+
+// =====================================================================
+// THE CITY. Built, not scattered. A block in San Francisco is about 275 by
+// 412 feet, which is 92 by 137 yards, and the traffic is drawn at its true
+// length in the same units, so a city block comes out a little longer than
+// a ferry. That is the proportion it should be. Buildings sit in LOTS inside
+// each block and cannot overlap, because they are laid out, not sprinkled.
+//
+// The cost of the 30 per cent compression is that only a handful of blocks
+// fit where forty belong, so this is a small downtown. Correct proportions
+// were the priority.
+// =====================================================================
+const BLOCK_W = 92, BLOCK_H = 137, STREET = 26;
+const GRID_A = -0.58;                    // the downtown grid, canted to the bay
+const CITY_ORIGIN = { x: 0, y: 0 };
+let CITY_BLOCKS = null;
+function buildCity(){
+  const ca = Math.cos(GRID_A), sa = Math.sin(GRID_A);
+  CITY_ORIGIN.x = G.FERRY_BUILDING.x - 250;
+  CITY_ORIGIN.y = G.FERRY_BUILDING.y - 40;
+  const blocks = [];
+  for (let i = -3; i <= 7; i++){
+    for (let j = -4; j <= 5; j++){
+      const d1 = i * (BLOCK_W + STREET), d2 = j * (BLOCK_H + STREET);
+      const cx = CITY_ORIGIN.x + ca*d1 - sa*d2;
+      const cy = CITY_ORIGIN.y + sa*d1 + ca*d2;
+      if (!CITYONLY(cx, cy)) continue;
+      // the whole block must be ashore, or half a building ends up in the bay
+      let ok = true;
+      for (const [ox, oy] of [[-.5,-.5],[.5,-.5],[-.5,.5],[.5,.5]]){
+        const px = cx + ca*(ox*BLOCK_W) - sa*(oy*BLOCK_H);
+        const py = cy + sa*(ox*BLOCK_W) + ca*(oy*BLOCK_H);
+        if (!CITYONLY(px, py)) { ok = false; break; }
+      }
+      if (!ok) continue;
+      // lots: two across, three deep, each with its own building
+      const lots = [];
+      for (let lx = 0; lx < 2; lx++){
+        for (let ly = 0; ly < 3; ly++){
+          const seed = (i+9)*137 + (j+9)*31 + lx*7 + ly;
+          const m = 5 + rnd2(seed)*5;                       // a little air round it
+          const w = BLOCK_W/2 - m, h = BLOCK_H/3 - m;
+          const ox = (lx - .5) * (BLOCK_W/2);
+          const oy = (ly - 1)  * (BLOCK_H/3);
+          lots.push({ ox, oy, w, h,
+                      tall: rnd2(seed+3) > .66,
+                      tone: rnd2(seed+5) });
+        }
+      }
+      blocks.push({ cx, cy, lots });
+    }
+  }
+  CITY_BLOCKS = blocks;
+}
+function onScreen(x, y, pad){
+  const sx = T.X(x), sy = T.Y(y), p = pad || 0;
+  return sx > -p && sx < W + p && sy > -p && sy < H + p;
+}
+function drawTown(){
+  if (!CITY_BLOCKS) buildCity();
+  const ca = Math.cos(GRID_A), sa = Math.sin(GRID_A);
+
+  // the streets: the ground between the blocks, and lamps down them
+  ctx.save();
+  landPoly(G.CITY, [[14000,14000],[-9000,14000]]); ctx.clip();
+  ctx.fillStyle = "#2d3128";
+  for (const b of CITY_BLOCKS){
+    if (!onScreen(b.cx, b.cy, T.S(160))) continue;
+    ctx.save(); ctx.translate(T.X(b.cx), T.Y(b.cy)); ctx.rotate(GRID_A);
+    ctx.fillStyle = "#3a3f33";                              // the street surface
+    ctx.fillRect(T.S(-(BLOCK_W+STREET)/2), T.S(-(BLOCK_H+STREET)/2),
+                 T.S(BLOCK_W+STREET), T.S(BLOCK_H+STREET));
+    ctx.fillStyle = "#23281f";                              // the block itself
+    ctx.fillRect(T.S(-BLOCK_W/2), T.S(-BLOCK_H/2), T.S(BLOCK_W), T.S(BLOCK_H));
+    ctx.restore();
+  }
+  // buildings, one to a lot, so nothing overlaps anything
+  for (const b of CITY_BLOCKS){
+    if (!onScreen(b.cx, b.cy, T.S(160))) continue;
+    ctx.save(); ctx.translate(T.X(b.cx), T.Y(b.cy)); ctx.rotate(GRID_A);
+    for (const L of b.lots){
+      const x = L.ox - L.w/2, y = L.oy - L.h/2;
+      ctx.fillStyle = "rgba(4,6,10,.6)";                    // its shadow
+      ctx.fillRect(T.S(x)+T.S(2.5), T.S(y)+T.S(3), T.S(L.w), T.S(L.h));
+      ctx.fillStyle = L.tall ? "#565f4e" : (L.tone > .5 ? "#464e3e" : "#3d4536");
+      ctx.fillRect(T.S(x), T.S(y), T.S(L.w), T.S(L.h));
+      ctx.fillStyle = L.tall ? "#636d59" : "#4e5745";       // the lit roof plane
+      ctx.fillRect(T.S(x), T.S(y), T.S(L.w), T.S(L.h*.45));
+      ctx.strokeStyle = "rgba(10,14,10,.7)"; ctx.lineWidth = Math.max(1, T.S(.5));
+      ctx.strokeRect(T.S(x), T.S(y), T.S(L.w), T.S(L.h));
+      // windows in rows, and only some of them burning
+      ctx.fillStyle = "rgba(255,206,140,.85)";
+      const cols = Math.max(2, Math.round(L.w/9)), rows = Math.max(2, Math.round(L.h/11));
+      for (let i2=0;i2<cols;i2++) for (let j2=0;j2<rows;j2++){
+        if (((i2*5 + j2*3 + Math.round(L.ox)) % 4) === 0) continue;
+        ctx.fillRect(T.S(x + 2.5 + i2*(L.w-5)/cols), T.S(y + 2.5 + j2*(L.h-5)/rows),
+                     Math.max(1, T.S(2.4)), Math.max(1, T.S(2)));
+      }
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // street lamps along the front
+  for (const b of CITY_BLOCKS){
+    if (!onScreen(b.cx, b.cy, T.S(120))) continue;
+    stamp(ctx, BLOB_LAMP, T.X(b.cx), T.Y(b.cy), Math.max(8, T.S(90)), .13);
+  }
+
+  // outside downtown these are posts and settlements, not a grid: a few
+  // buildings each, laid out along the shore, never on top of one another
+  for (const b of G.BUILDINGS){
+    if (b.name === "" && Math.hypot(b.x-G.FERRY_BUILDING.x, b.y-G.FERRY_BUILDING.y) < 900) continue;
+    const n = 5;
+    for (let i=0;i<n;i++){
+      const r0 = rnd2(i*13 + Math.round(b.x));
+      const ang = Math.atan2(b.y - G.FORT_POINT.y, b.x - G.FORT_POINT.x) + Math.PI/2;
+      const off = (i - (n-1)/2) * (b.w*.55);
+      const hx = b.x + Math.cos(ang)*off, hy = b.y + Math.sin(ang)*off;
+      if (!onLand(hx, hy)) continue;
+      block(hx, hy, b.w*.4 + r0*8, b.h*.45 + r0*6, ang);
+    }
+    if (b.name && T.k>.4){
+      ctx.globalAlpha=.6; ctx.fillStyle="#b9c6d1";
+      ctx.font=`12px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign="center"; ctx.fillText(b.name, T.X(b.x), T.Y(b.y)-T.S(b.h*.9));
+      ctx.globalAlpha=1;
+    }
+  }
+}
+
+// The seawall, and the piers standing out from it at right angles with a
+// shed the length of each. They are attached to the shore, because a pier
+// that floats free of the land is not a pier.
+function drawWaterfront(){
+  const SW = G.SEAWALL;
+  ctx.strokeStyle = "#5b636a"; ctx.lineWidth = Math.max(2, T.S(7));
+  ctx.beginPath();
+  ctx.moveTo(T.X(SW[0][0]), T.Y(SW[0][1]));
+  for (const [x,y] of SW) ctx.lineTo(T.X(x), T.Y(y));
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(200,214,226,.45)"; ctx.lineWidth = Math.max(1, T.S(1.2));
+  ctx.stroke();
+
+  for (let i = 0; i < SW.length - 1; i++){
+    const a = SW[i], b2 = SW[i+1];
+    const len = Math.hypot(b2[0]-a[0], b2[1]-a[1]);
+    const nx = (b2[1]-a[1])/len, ny = -(b2[0]-a[0])/len;   // seaward normal
+    const n = Math.max(1, Math.round(len/64));
+    for (let k = 0; k < n; k++){
+      const f = (k + .5)/n;
+      const rx = a[0] + (b2[0]-a[0])*f, ry = a[1] + (b2[1]-a[1])*f;
+      // skip the stretch the Ferry Building and your own wharf occupy
+      if (Math.hypot(rx-G.FERRY_BUILDING.x, ry-G.FERRY_BUILDING.y) < 130) continue;
+      if (Math.hypot(rx-G.WHARF.rootX, ry-G.WHARF.rootY) < 120) continue;
+      const pl = 78 + (k%3)*22, pw = 24;
+      const ang = Math.atan2(ny, nx);
+      ctx.save(); ctx.translate(T.X(rx), T.Y(ry)); ctx.rotate(ang);
+      ctx.fillStyle="rgba(4,6,10,.55)";
+      ctx.fillRect(0, T.S(-pw/2)+T.S(2), T.S(pl), T.S(pw));
+      ctx.fillStyle="#464f57";                              // the pier deck
+      ctx.fillRect(0, T.S(-pw/2), T.S(pl), T.S(pw));
+      ctx.strokeStyle="rgba(20,26,32,.7)"; ctx.lineWidth=Math.max(1,T.S(.5));
+      for (let q=0;q<=8;q++){                               // the piles under it
+        ctx.beginPath();
+        ctx.moveTo(T.S(q*pl/8), T.S(-pw/2)); ctx.lineTo(T.S(q*pl/8), T.S(pw/2));
+        ctx.stroke();
+      }
+      ctx.fillStyle="#576169";                              // the shed on it
+      ctx.fillRect(T.S(8), T.S(-pw/2+3), T.S(pl-18), T.S(pw-6));
+      ctx.fillStyle="#646f78";
+      ctx.fillRect(T.S(8), T.S(-pw/2+3), T.S(pl-18), T.S((pw-6)/2));
+      ctx.fillStyle="rgba(255,206,140,.6)";
+      for (let q=0;q<5;q++) ctx.fillRect(T.S(14+q*(pl-30)/5), T.S(-2), T.S(3), T.S(4));
+      ctx.restore();
+    }
+  }
+}
+
+function drawFerryBuilding(){
+  const f = G.FERRY_BUILDING;
+  // She is 660 feet long, which is 220 yards: nearly three times a ferry.
+  const LEN = 210, WID = 34;
+  // the slips first, cut into the front, with the building at their head
+  for (const sl of G.SLIPS){
+    ctx.fillStyle = "#0e161d";                               // water in the pen
+    ctx.fillRect(T.X(sl.headX), T.Y(sl.y)-T.S(sl.wide/2), T.S(sl.len), T.S(sl.wide));
+    ctx.fillStyle = "#4a545c";                               // piling either side
+    ctx.fillRect(T.X(sl.headX), T.Y(sl.y)-T.S(sl.wide/2+3), T.S(sl.len), T.S(3));
+    ctx.fillRect(T.X(sl.headX), T.Y(sl.y)+T.S(sl.wide/2),   T.S(sl.len), T.S(3));
+    ctx.fillStyle = "rgba(255,214,150,.9)";                  // lamp on each pile head
+    ctx.fillRect(T.X(sl.mouthX)-T.S(1.5), T.Y(sl.y)-T.S(sl.wide/2+3), T.S(3), T.S(3));
+    ctx.fillRect(T.X(sl.mouthX)-T.S(1.5), T.Y(sl.y)+T.S(sl.wide/2),   T.S(3), T.S(3));
+    ctx.fillStyle = "#6b7680";                               // the apron at her head
+    ctx.fillRect(T.X(sl.headX)-T.S(6), T.Y(sl.y)-T.S(sl.wide/2), T.S(6), T.S(sl.wide));
+  }
+  // the building itself
+  ctx.fillStyle="rgba(4,6,10,.6)";
+  ctx.fillRect(T.X(f.x)+T.S(3), T.Y(f.y)-T.S(LEN/2)+T.S(3), T.S(WID), T.S(LEN));
+  ctx.fillStyle="#5a6670";
+  ctx.fillRect(T.X(f.x), T.Y(f.y)-T.S(LEN/2), T.S(WID), T.S(LEN));
+  ctx.fillStyle="#6b7680";
+  ctx.fillRect(T.X(f.x), T.Y(f.y)-T.S(LEN/2), T.S(WID/2), T.S(LEN));
+  ctx.strokeStyle="rgba(20,26,32,.65)"; ctx.lineWidth=Math.max(1,T.S(.5));
+  ctx.strokeRect(T.X(f.x), T.Y(f.y)-T.S(LEN/2), T.S(WID), T.S(LEN));
+  // the arcade along the whole front, arch by arch
+  ctx.strokeStyle="rgba(210,222,232,.5)"; ctx.lineWidth=Math.max(1,T.S(.45));
+  for (let i=-24;i<=24;i++){
+    ctx.beginPath();
+    ctx.moveTo(T.X(f.x), T.Y(f.y+i*4.2)); ctx.lineTo(T.X(f.x+WID), T.Y(f.y+i*4.2));
+    ctx.stroke();
+  }
+  ctx.fillStyle="rgba(255,214,150,.8)";
+  for (let i=-23;i<=23;i++) ctx.fillRect(T.X(f.x+3), T.Y(f.y+i*4.2)-T.S(.9), T.S(6), T.S(1.8));
+  // the 1898 clock tower at the middle, 245 feet, with its lit face
+  ctx.fillStyle="rgba(4,6,10,.6)";
+  ctx.fillRect(T.X(f.x+WID*.2)+T.S(3), T.Y(f.y)-T.S(13)+T.S(3), T.S(22), T.S(26));
+  ctx.fillStyle="#7d8892";
+  ctx.fillRect(T.X(f.x+WID*.2), T.Y(f.y)-T.S(13), T.S(22), T.S(26));
+  ctx.fillStyle="#98a3ad";
+  ctx.fillRect(T.X(f.x+WID*.2+3), T.Y(f.y)-T.S(10), T.S(16), T.S(20));
+  ctx.fillStyle="rgba(255,238,196,.95)";
+  ctx.beginPath();
+  ctx.arc(T.X(f.x+WID*.2+11), T.Y(f.y), Math.max(2.5,T.S(6)), 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle="#4a5058"; ctx.lineWidth=Math.max(1,T.S(.6));
+  ctx.beginPath();
+  ctx.moveTo(T.X(f.x+WID*.2+11), T.Y(f.y));
+  ctx.lineTo(T.X(f.x+WID*.2+15), T.Y(f.y)-T.S(2.4)); ctx.stroke();
+  if (T.k > .25){
+    ctx.globalAlpha=.85; ctx.fillStyle="#e2e9ef";
+    ctx.font=`${Math.max(11,Math.min(17,T.S(11)))}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign="left";
+    ctx.fillText("the Ferry Building", T.X(f.x+WID+10), T.Y(f.y)); ctx.globalAlpha=1;
+  }
+}
+
+function drawLights(t){
+  for (const L of G.LIGHTS){
+    let on = 1;
+    if (L.period) on = (t % L.period) < L.period*.72 ? 1 : .12;   // occulting
+    const r = T.S(L.range * G.COMPRESS) * (.5 + .5*on);
+    const g = ctx.createRadialGradient(T.X(L.x),T.Y(L.y),0,T.X(L.x),T.Y(L.y),Math.max(8,r));
+    g.addColorStop(0, L.col.replace(")", "") );
+    ctx.save();
+    ctx.globalAlpha = .30*on;
+    const grd = ctx.createRadialGradient(T.X(L.x),T.Y(L.y),0,T.X(L.x),T.Y(L.y),Math.max(10,r));
+    grd.addColorStop(0, L.col); grd.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grd;
+    ctx.fillRect(T.X(L.x)-r, T.Y(L.y)-r, r*2, r*2);
+    ctx.restore();
+    ctx.fillStyle = L.col; ctx.globalAlpha = on;
+    ctx.beginPath(); ctx.arc(T.X(L.x), T.Y(L.y), Math.max(2,T.S(7)), 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (T.k > .16){
+      ctx.globalAlpha=.7; ctx.fillStyle="#b9c6d1";
+      ctx.font = `${Math.max(9,Math.min(13,T.S(10)))}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign="center";
+      ctx.fillText(L.name, T.X(L.x), T.Y(L.y)-T.S(16)); ctx.globalAlpha=1;
+    }
+  }
+}
+function drawHazards(t){
+  for (const h of G.HAZARDS){
+    const br = .4+.6*Math.max(0,Math.sin(t*.9+h.x*.004));
+    ctx.globalAlpha = .12+.34*br; ctx.fillStyle = C.foam;
+    ctx.beginPath(); ctx.ellipse(T.X(h.x),T.Y(h.y),T.S(h.r*1.7),T.S(h.r*1.3),0,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (!h.shape) h.shape = rockShape((h.x*7919)|0, h.r, 11);
+    ctx.beginPath();
+    ctx.moveTo(T.X(h.x+h.shape[0][0]), T.Y(h.y+h.shape[0][1]));
+    for (const [sx,sy] of h.shape) ctx.lineTo(T.X(h.x+sx), T.Y(h.y+sy));
+    ctx.closePath();
+    ctx.fillStyle = "#2b3742"; ctx.fill();
+    ctx.strokeStyle="rgba(210,226,238,.5)"; ctx.lineWidth=Math.max(1,T.S(1.2)); ctx.stroke();
+    ctx.save(); ctx.clip();
+    ctx.fillStyle="rgba(170,190,206,.3)";
+    ctx.beginPath();
+    ctx.moveTo(T.X(h.x-h.r),T.Y(h.y-h.r)); ctx.lineTo(T.X(h.x+h.r*.5),T.Y(h.y-h.r));
+    ctx.lineTo(T.X(h.x-h.r*.45),T.Y(h.y+h.r*.35)); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="rgba(6,9,13,.5)";
+    ctx.beginPath();
+    ctx.moveTo(T.X(h.x+h.r),T.Y(h.y+h.r)); ctx.lineTo(T.X(h.x+h.r),T.Y(h.y-h.r*.2));
+    ctx.lineTo(T.X(h.x-h.r*.2),T.Y(h.y+h.r)); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    if (h.name === "MILE ROCKS" && T.k > .14){
+      ctx.globalAlpha=.85; ctx.fillStyle="#e2705a";
+      ctx.font = `${Math.max(10,Math.min(14,T.S(12)))}px ${getComputedStyle(document.body).fontFamily}`;
+      ctx.textAlign="center";
+      ctx.fillText("Mile Rocks, unlit", T.X(h.x), T.Y(h.y)-T.S(h.r+14)); ctx.globalAlpha=1;
+    }
+  }
+}
+// Each class drawn as itself, from above. You should be able to tell a
+// battleship from a ferry from a hay scow at a glance, because in a crowded
+// bay that is the whole of the problem.
+function drawTrafficVessel(v, t){
+  const x=T.X(v.x), y=T.Y(v.y);
+  const L=v.len, B=L*(v.kind==="scow"?.34:v.kind==="cruiser"?.155:v.kind==="ferry"?.28:.22);
+  ctx.save(); ctx.translate(x,y); ctx.rotate(v.hdg||0);
+  const S=T.S;
+
+  // her wash, if she is moving
+  if (v.sp){
+    ctx.globalAlpha=.16; ctx.fillStyle="#0c161d";
+    ctx.beginPath(); ctx.ellipse(0,S(L*.6),S(B*.5),S(L*.2),0,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+
+  // hull
+  ctx.beginPath();
+  if (v.kind==="scow"){                                  // flat-bowed, a box
+    ctx.rect(S(-B/2), S(-L/2), S(B), S(L));
+  } else {
+    ctx.moveTo(0,S(-L/2));
+    ctx.bezierCurveTo(S(B*.5),S(-L*.3),S(B*.5),S(L*.2),S(B*.42),S(L/2));
+    ctx.lineTo(S(-B*.42),S(L/2));
+    ctx.bezierCurveTo(S(-B*.5),S(L*.2),S(-B*.5),S(-L*.3),0,S(-L/2));
+  }
+  ctx.closePath();
+  ctx.fillStyle = v.kind==="cruiser" ? "#d9dcd6"         // WHITE HULL, 1905 navy
+                : v.kind==="ferry" ? "#2b3a45"
+                : v.kind==="scow" ? "#2f3a33" : "#141d26";
+  ctx.fill();
+  ctx.strokeStyle = v.kind==="cruiser" ? "rgba(40,48,44,.6)" : "rgba(160,180,196,.45)";
+  ctx.lineWidth=Math.max(1,S(.9)); ctx.stroke();
+
+  if (v.kind==="cruiser"){
+    // USS OLYMPIA, from directly above. Forward to aft: a RAM BOW, the
+    // raised forecastle with the forward 8-inch turret on it, the bridge and
+    // conning tower, TWO FUNNELS CLOSE TOGETHER amidships with the boats on
+    // skids between them, the after superstructure, the after turret, and a
+    // low quarterdeck. Ten 5-inch guns live in SPONSONS that stand out from
+    // her sides, which from above is what tells a cruiser from a battleship.
+    // White hull, buff upperworks: the scheme the Navy wore until 1909.
+    const su = L*.40, suW = B*.52;
+
+    // the ram: her stem carries on underwater, so she is pointed
+    ctx.fillStyle="#cfd2cb";
+    ctx.beginPath();
+    ctx.moveTo(0, S(-L*.52));
+    ctx.bezierCurveTo(S(B*.40), S(-L*.30), S(B*.42), S(L*.10), S(B*.34), S(L*.42));
+    ctx.lineTo(S(-B*.34), S(L*.42));
+    ctx.bezierCurveTo(S(-B*.42), S(L*.10), S(-B*.40), S(-L*.30), 0, S(-L*.52));
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle="rgba(70,76,70,.55)"; ctx.lineWidth=Math.max(1,S(.4)); ctx.stroke();
+
+    // the sponsons: five a side, standing out from the hull
+    ctx.fillStyle="#c1c4bc";
+    for (let i=-2;i<=2;i++){
+      const sy2 = i*L*.085;
+      ctx.beginPath();
+      ctx.ellipse(S(-B*.46), S(sy2), S(B*.10), S(L*.035), 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(S(B*.46), S(sy2), S(B*.10), S(L*.035), 0, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle="#6e6553"; ctx.lineWidth=Math.max(1,S(.8));
+      ctx.beginPath();
+      ctx.moveTo(S(-B*.52), S(sy2)); ctx.lineTo(S(-B*.66), S(sy2 - L*.012)); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(S(B*.52), S(sy2)); ctx.lineTo(S(B*.66), S(sy2 - L*.012)); ctx.stroke();
+    }
+
+    // the raised forecastle
+    ctx.fillStyle="#d9dcd4";
+    ctx.beginPath();
+    ctx.moveTo(0, S(-L*.50));
+    ctx.bezierCurveTo(S(B*.34), S(-L*.34), S(B*.34), S(-L*.20), S(B*.28), S(-L*.16));
+    ctx.lineTo(S(-B*.28), S(-L*.16));
+    ctx.bezierCurveTo(S(-B*.34), S(-L*.20), S(-B*.34), S(-L*.34), 0, S(-L*.50));
+    ctx.closePath(); ctx.fill();
+
+    // superstructure, buff, tapered to her
+    ctx.fillStyle="#c6ae76";
+    ctx.beginPath();
+    ctx.moveTo(0, S(-su*.62));
+    ctx.bezierCurveTo(S(suW*.5), S(-su*.3), S(suW*.5), S(su*.2), S(suW*.38), S(su*.5));
+    ctx.lineTo(S(-suW*.38), S(su*.5));
+    ctx.bezierCurveTo(S(-suW*.5), S(su*.2), S(-suW*.5), S(-su*.3), 0, S(-su*.62));
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle="rgba(70,62,44,.5)"; ctx.lineWidth=Math.max(1,S(.35)); ctx.stroke();
+
+    // conning tower and bridge
+    ctx.fillStyle="#93876a";
+    ctx.beginPath(); ctx.arc(0, S(-su*.46), S(B*.12), 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle="#b4a47e";
+    ctx.fillRect(S(-suW*.46), S(-su*.40), S(suW*.92), S(L*.035));
+
+    // TWO FUNNELS, CLOSE TOGETHER, which is Olympia's signature from above
+    for (const fy of [-L*.03, L*.055]){
+      ctx.fillStyle="#8a7a55";
+      ctx.beginPath(); ctx.ellipse(0, S(fy), S(B*.17), S(B*.13), 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle="#4f4739";
+      ctx.beginPath(); ctx.ellipse(0, S(fy), S(B*.10), S(B*.075), 0, 0, Math.PI*2); ctx.fill();
+    }
+    // boats on skids between and beside them
+    ctx.fillStyle="#7e7360";
+    for (const bx of [-suW*.42, suW*.42]){
+      for (const by of [-L*.012, L*.03]){
+        ctx.fillRect(S(bx-B*.05), S(by), S(B*.1), S(L*.05));
+      }
+    }
+
+    // the two 8-inch turrets, twin guns in each, fore and aft
+    for (const [ty, out] of [[-L*.30,-1],[L*.33,1]]){
+      ctx.fillStyle="#a89c80";
+      ctx.beginPath(); ctx.arc(0, S(ty), S(B*.26), 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle="#6c6659";
+      ctx.beginPath(); ctx.arc(0, S(ty), S(B*.20), 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle="rgba(40,40,36,.7)"; ctx.lineWidth=Math.max(1,S(.4));
+      ctx.beginPath(); ctx.arc(0, S(ty), S(B*.20), 0, Math.PI*2); ctx.stroke();
+      ctx.strokeStyle="#33322c"; ctx.lineWidth=Math.max(1.2,S(1.1));
+      for (const gx of [-B*.07, B*.07]){
+        ctx.beginPath();
+        ctx.moveTo(S(gx), S(ty));
+        ctx.lineTo(S(gx), S(ty + out*L*.115));
+        ctx.stroke();
+      }
+    }
+
+    // two military masts with circular fighting tops
+    for (const my of [-su*.34, su*.44]){
+      ctx.fillStyle="#7a7160";
+      ctx.beginPath(); ctx.arc(0, S(my), S(B*.095), 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle="#d3ccb8"; ctx.lineWidth=Math.max(1,S(.45));
+      ctx.beginPath(); ctx.arc(0, S(my), S(B*.095), 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle="#3f3c34";
+      ctx.beginPath(); ctx.arc(0, S(my), S(B*.03), 0, Math.PI*2); ctx.fill();
+    }
+    // ensign aft, jack forward
+    ctx.fillStyle="#e4e9ee";
+    ctx.fillRect(S(-1.1), S(L*.43), S(2.2), S(L*.04));
+    ctx.fillRect(S(-1.1), S(-L*.52), S(2.2), S(L*.035));
+  } else if (v.kind==="ferry"){
+    // a double-ender: houses the full length, walking beam amidships,
+    // windows lit all the way along, and a paddle box each side
+    ctx.fillStyle="#46555f";
+    ctx.fillRect(S(-B*.36),S(-L*.42),S(B*.72),S(L*.84));
+    ctx.fillStyle="rgba(255,206,140,.75)";
+    for(let i=-6;i<=6;i++) ctx.fillRect(S(-B*.3),S(i*L*.062),S(B*.6),S(L*.022));
+    ctx.fillStyle="#5d6c76";
+    ctx.fillRect(S(-B*.56),S(-L*.10),S(B*.2),S(L*.2));
+    ctx.fillRect(S(B*.36),S(-L*.10),S(B*.2),S(L*.2));
+    ctx.fillStyle="#2a2118";
+    ctx.beginPath(); ctx.ellipse(0,0,S(B*.1),S(B*.08),0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#e2705a"; ctx.fillRect(S(-B/2),S(-L*.44),S(2.6),S(2.6));
+    ctx.fillStyle="#7fd6a2"; ctx.fillRect(S(B/2-2.6),S(-L*.44),S(2.6),S(2.6));
+  } else if (v.kind==="steamer"){
+    ctx.fillStyle="#2b3742";
+    ctx.fillRect(S(-B*.3),S(-L*.1),S(B*.6),S(L*.34));
+    ctx.fillStyle="#3a2f22";                             // one tall funnel
+    ctx.beginPath(); ctx.ellipse(0,S(L*.02),S(B*.15),S(B*.12),0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle="#2a2118"; ctx.lineWidth=Math.max(1,S(.8));
+    for(const my of [-L*.3, L*.34]){ ctx.beginPath();
+      ctx.moveTo(S(-B*.8),S(my)); ctx.lineTo(S(B*.8),S(my)); ctx.stroke(); }
+    ctx.fillStyle="rgba(255,206,140,.6)"; ctx.fillRect(S(-B*.12),S(L*.12),S(B*.24),S(L*.05));
+  } else if (v.kind==="schooner"){
+    ctx.fillStyle="#c8781f";                             // deckload of lumber
+    ctx.fillRect(S(-B*.34),S(-L*.28),S(B*.68),S(L*.46));
+    ctx.fillStyle="#2b3742";
+    ctx.fillRect(S(-B*.3),S(L*.24),S(B*.6),S(L*.18));
+    ctx.fillStyle="#3a2f22";
+    ctx.beginPath(); ctx.ellipse(0,S(L*.3),S(B*.12),S(B*.1),0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle="#2a2118"; ctx.lineWidth=Math.max(1,S(.8));
+    for(const my of [-L*.34, L*.16]){ ctx.beginPath();
+      ctx.moveTo(0,S(my)); ctx.lineTo(S(B*1.1),S(my+L*.2)); ctx.stroke(); }
+  } else if (v.kind==="square"){
+    ctx.fillStyle="#1b242c";
+    ctx.fillRect(S(-B*.3),S(-L*.05),S(B*.6),S(L*.2));
+    ctx.strokeStyle="#2a2118"; ctx.lineWidth=Math.max(1,S(1.1));
+    for(const my of [-L*.28, -L*.02, L*.24]){            // three squared yards
+      ctx.beginPath(); ctx.moveTo(S(-B*1.5),S(my)); ctx.lineTo(S(B*1.5),S(my)); ctx.stroke();
+      ctx.globalAlpha=.16; ctx.fillStyle="#8d97a2";
+      ctx.fillRect(S(-B*1.4),S(my),S(B*2.8),S(L*.1)); ctx.globalAlpha=1;
+    }
+    ctx.strokeStyle="rgba(206,198,180,.5)"; ctx.lineWidth=Math.max(1,S(.7));
+    ctx.beginPath(); ctx.moveTo(0,S(-L/2)); ctx.lineTo(0,S(-L*.95)); ctx.stroke();
+  } else if (v.kind==="tug"){
+    ctx.fillStyle="#2b3742";
+    ctx.fillRect(S(-B*.34),S(-L*.08),S(B*.68),S(L*.3));
+    ctx.fillStyle="#3a2f22";
+    ctx.beginPath(); ctx.ellipse(0,S(L*.02),S(B*.2),S(B*.16),0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="rgba(255,206,140,.7)"; ctx.fillRect(S(-B*.14),S(-L*.04),S(B*.28),S(L*.06));
+  } else if (v.kind==="scow"){
+    ctx.fillStyle="#7a5a2c";                             // her hay deckload
+    ctx.fillRect(S(-B*.42),S(-L*.34),S(B*.84),S(L*.56));
+    ctx.strokeStyle="#2a2118"; ctx.lineWidth=Math.max(1,S(.8));
+    ctx.beginPath(); ctx.moveTo(0,S(-L*.1)); ctx.lineTo(S(B*.9),S(L*.2)); ctx.stroke();
+  } else if (v.kind==="anchored"){
+    ctx.fillStyle="rgba(255,226,170,.8)";
+    ctx.beginPath(); ctx.arc(0,S(-L*.45),Math.max(1.5,S(2.4)),0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle="#2a2118"; ctx.lineWidth=Math.max(1,S(.8));
+    for(const my of [-L*.2, L*.14]){ ctx.beginPath();
+      ctx.moveTo(0,S(my)); ctx.lineTo(S(B*.9),S(my+L*.18)); ctx.stroke(); }
+  }
+  ctx.restore();
+
+  // name her when she is close enough to matter
+  if (v.name && T.k > .35 && Math.hypot(v.x-ship.x, v.y-ship.y) < 420){
+    ctx.globalAlpha=.6; ctx.fillStyle="#b9c6d1";
+    ctx.font = `11px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign="center";
+    ctx.fillText(v.name, x, y - T.S(v.len*.62));
+    ctx.globalAlpha=1;
+  }
+}
+function drawTraffic(t){
+  const all = traffic.concat(ANCHORAGE
+    .map((a,i)=>({ x:a.x, y:a.y, hdg:.5+i*.4, kind:"anchored", len:64 })));
+  for (const v of all){
+    const x=T.X(v.x), y=T.Y(v.y);
+    if (x<-200||x>W+200||y<-200||y>H+200) continue;
+    drawTrafficVessel(v, t);
+  }
+}
+
+// The wind, drawn on the water: streaks running downwind, fast, so you can
+// see which way it is blowing without reading it off a line of type.
+function drawWind(t){
+  const r = (env.windFrom + 180) * Math.PI/180;
+  const ux = Math.sin(r), uy = -Math.cos(r);
+  const cell = 90, hw = W/2/T.k, hh = H/2/T.k;
+  const i0 = Math.floor((cam.x-hw)/cell), i1 = Math.ceil((cam.x+hw)/cell);
+  const j0 = Math.floor((cam.y-hh)/cell), j1 = Math.ceil((cam.y+hh)/cell);
+  if ((i1-i0)*(j1-j0) > 3000) return;
+  const run = 26 + env.windKn * 1.6;
+  ctx.strokeStyle = "rgba(196,216,232,.16)";
+  ctx.lineWidth = Math.max(1, T.S(1));
+  ctx.beginPath();
+  for (let j=j0;j<=j1;j++) for (let i=i0;i<=i1;i++){
+    const h = (((i*73856093)^(j*19349663))>>>0);
+    const ph = (h % 1000)/1000;
+    const trav = ((t * (env.windKn*2.4) / cell) + ph) % 1;
+    const bx = i*cell + (h%997)/997*cell + ux*trav*cell*3;
+    const by = j*cell + ((h>>10)%991)/991*cell + uy*trav*cell*3;
+    ctx.moveTo(T.X(bx), T.Y(by));
+    ctx.lineTo(T.X(bx + ux*run), T.Y(by + uy*run));
+  }
+  ctx.stroke();
+}
+// and a rose, so the wind, the tide and her head are all in one place
+function drawRose(){
+  const R = Math.min(94, W*.07), cx = W - R - 34, cy = 210 + R;
+  ctx.save();
+  ctx.globalAlpha=.75; ctx.strokeStyle="rgba(170,186,200,.55)"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.stroke();
+  for(let i=0;i<16;i++){ const a=i*Math.PI/8-Math.PI/2;
+    ctx.beginPath();
+    ctx.moveTo(cx+Math.cos(a)*(i%4?R*.9:R*.78), cy+Math.sin(a)*(i%4?R*.9:R*.78));
+    ctx.lineTo(cx+Math.cos(a)*R, cy+Math.sin(a)*R); ctx.stroke(); }
+  ctx.fillStyle="#8b97a3"; ctx.font=`10px ${getComputedStyle(document.body).fontFamily}`;
+  ctx.textAlign="center"; ctx.fillText("N", cx, cy-R-6);
+  const arrow=(deg,len,col,w)=>{ const a=(deg-90)*Math.PI/180;
+    const ex=cx+Math.cos(a)*len, ey=cy+Math.sin(a)*len;
+    ctx.globalAlpha=1; ctx.strokeStyle=col; ctx.lineWidth=w;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(ex,ey); ctx.stroke();
+    ctx.save(); ctx.translate(ex,ey); ctx.rotate(a); ctx.fillStyle=col;
+    ctx.beginPath(); ctx.moveTo(8,0); ctx.lineTo(-5,4); ctx.lineTo(-5,-4);
+    ctx.closePath(); ctx.fill(); ctx.restore(); };
+  arrow((env.windFrom+180)%360, R*.85, "rgba(226,236,244,.8)", 2.2);
+  const setDir=(Math.atan2(env.curX,-env.curY)*180/Math.PI+360)%360;
+  arrow(setDir, R*.55, "rgba(242,166,60,.9)", 2.4);
+  arrow(degOf(ship.hdg), R*.4, "rgba(127,214,162,.9)", 2);
+  ctx.globalAlpha=.6; ctx.textAlign="right";
+  ctx.fillStyle="#cfd8e0"; ctx.fillText("wind", cx+R, cy+R+14);
+  ctx.fillStyle="#f2a63c"; ctx.fillText("tide", cx+R, cy+R+27);
+  ctx.fillStyle="#7fd6a2"; ctx.fillText("her head", cx+R, cy+R+40);
+  ctx.restore();
+}
+
+// In fog you do not steer by what you can see, you steer by bearings. These
+// are the marks a master would be taking: the lights, and the Gate itself.
+function drawBearings(){
+  const marks = [
+    { p: G.PT_BONITA,  n: "Pt Bonita", c: "#fff2d0" },
+    { p: G.LIME_POINT, n: "Lime Point", c: "#ff9a7a" },
+    { p: G.FORT_POINT, n: "Fort Point", c: "#ffe8b8" },
+    { p: G.ALCATRAZ,   n: "Alcatraz",  c: "#fff4dc" },
+    { p: G.BERTH,      n: "the wharf", c: "#f2a63c" },
+  ];
+  const cx = W/2, cy = H/2, R = Math.min(W,H)*.42;
+  for (const m of marks){
+    const sx = T.X(m.p.x), sy = T.Y(m.p.y);
+    if (sx > 30 && sx < W-30 && sy > 30 && sy < H-30) continue;
+    const a = Math.atan2(sy-cy, sx-cx);
+    const px = cx + Math.cos(a)*R, py = cy + Math.sin(a)*R;
+    const dist = Math.hypot(m.p.x-ship.x, m.p.y-ship.y);
+    ctx.save();
+    ctx.translate(px,py); ctx.rotate(a);
+    ctx.globalAlpha=.55; ctx.fillStyle=m.c;
+    ctx.beginPath(); ctx.moveTo(11,0); ctx.lineTo(-7,5); ctx.lineTo(-7,-5);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha=.6; ctx.fillStyle=m.c;
+    ctx.font = `12px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign="center";
+    ctx.fillText(`${m.n} ${(dist/2027).toFixed(1)} mi`,
+                 px - Math.cos(a)*40, py - Math.sin(a)*26);
+    ctx.globalAlpha=1;
+  }
+}
+
+// A small chart in the corner, which is what you would have had on the table
+// below. It shows the whole bay, where you are in it, and where the traffic
+// is, because in this fog the deck view tells you almost nothing.
+function drawMinimap(){
+  const w = Math.min(300, W*.22), h = w*.62;
+  const x0 = 22, y0 = H - h - 96;   // clear of the readout under it
+  // the extent of the chart, in world yards
+  const X0 = G.PT_BONITA.x - 260, X1 = G.FERRY_BUILDING.x + 260;
+  const Y0 = G.ANGEL_IS.y - 200, Y1 = G.BERTH.y + 420;
+  const k = Math.min(w/(X1-X0), h/(Y1-Y0));
+  const mx = v => x0 + (v - X0)*k + (w - (X1-X0)*k)/2;
+  const my = v => y0 + (v - Y0)*k + (h - (Y1-Y0)*k)/2;
+
+  ctx.save();
+  ctx.fillStyle="rgba(8,12,17,.82)";
+  ctx.fillRect(x0-8, y0-8, w+16, h+16);
+  ctx.strokeStyle="rgba(150,166,180,.45)"; ctx.lineWidth=1;
+  ctx.strokeRect(x0-8, y0-8, w+16, h+16);
+  ctx.beginPath(); ctx.rect(x0-8,y0-8,w+16,h+16); ctx.clip();
+
+  const shore = (pts, closeTo, fill) => {
+    ctx.beginPath();
+    const all = pts.concat(closeTo);
+    ctx.moveTo(mx(all[0][0]), my(all[0][1]));
+    for (const [px,py] of all) ctx.lineTo(mx(px), my(py));
+    ctx.closePath(); ctx.fillStyle=fill; ctx.fill();
+    ctx.strokeStyle="rgba(180,198,214,.55)"; ctx.lineWidth=1; ctx.stroke();
+  };
+  shore(G.MARIN, [[-9000,-14000],[14000,-14000]], "#22302a");
+  shore(G.CITY,  [[14000,14000],[-9000,14000]],  "#2a2f24");
+  for (const is of G.ISLANDS){
+    ctx.beginPath();
+    ctx.moveTo(mx(is.poly[0][0]), my(is.poly[0][1]));
+    for (const [x,y] of is.poly) ctx.lineTo(mx(x), my(y));
+    ctx.closePath();
+    ctx.fillStyle="#2a3430"; ctx.fill();
+    ctx.strokeStyle="rgba(180,198,214,.6)"; ctx.lineWidth=1; ctx.stroke();
+  }
+  // the lights
+  for (const L of G.LIGHTS){
+    ctx.fillStyle = L.col;
+    ctx.beginPath(); ctx.arc(mx(L.x), my(L.y), 2.4, 0, Math.PI*2); ctx.fill();
+  }
+  // only what you have seen, and only where you last saw her
+  for (const v of traffic){
+    if (v.seen <= 0) continue;
+    ctx.globalAlpha = .25 + .75 * v.seen;
+    ctx.fillStyle = v.kind==="cruiser" ? "#e8eae4"
+                  : v.kind==="ferry" ? "#9fc4dd" : "#7d8996";
+    ctx.fillRect(mx(v.sx)-1.6, my(v.sy)-1.6, 3.2, 3.2);
+    if (v.seen < .99){                                  // a stale contact
+      ctx.strokeStyle = "rgba(190,204,216,.5)"; ctx.lineWidth = .8;
+      ctx.strokeRect(mx(v.sx)-2.6, my(v.sy)-2.6, 5.2, 5.2);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // where you are bound
+  ctx.strokeStyle="#f2a63c"; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.arc(mx(G.BERTH.x), my(G.BERTH.y), 5, 0, Math.PI*2); ctx.stroke();
+  // and where you are, with your head
+  const sx=mx(ship.x), sy=my(ship.y);
+  ctx.save(); ctx.translate(sx,sy); ctx.rotate(ship.hdg);
+  ctx.fillStyle="#7fd6a2";
+  ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(3.4,4); ctx.lineTo(-3.4,4);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+// =====================================================================
+// THE FOG IS THE GAME. You do not see the bay; you see a circle of water
+// round your own vessel, and whatever is lit. A lighthouse throws a great
+// pool of it. Another ship carries a small one, so she is a glow before she
+// is a hull, and by then she is close. Everything else is wool.
+//
+// Done as a mask: an opaque fog layer with holes punched out of it, which is
+// how you get hard-edged pools of visibility rather than a wash.
+// =====================================================================
+const fogCv = document.createElement("canvas");
+const fog = fogCv.getContext("2d");
+
+// A radial gradient built per call is the single most expensive thing in
+// this scene: the fog alone wanted sixty-odd of them every frame. Build ONE
+// soft disc as an image, and stamp it wherever a glow or a hole is needed.
+function makeBlob(inner, r, g, b){
+  const S2 = 128, c = document.createElement("canvas");
+  c.width = c.height = S2;
+  const x = c.getContext("2d");
+  const grd = x.createRadialGradient(S2/2, S2/2, S2/2*inner, S2/2, S2/2, S2/2);
+  grd.addColorStop(0, `rgba(${r},${g},${b},1)`);
+  grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  x.fillStyle = grd; x.fillRect(0,0,S2,S2);
+  return c;
+}
+const BLOB_HARD = makeBlob(.55, 0, 0, 0);     // for punching holes
+const BLOB_SOFT = makeBlob(.18, 0, 0, 0);
+const BLOB_WOOL = makeBlob(0, 140, 158, 174);
+const BLOB_LAMP = makeBlob(0, 255, 206, 140);
+function stamp(c2, img, x, y, r, alpha){
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !(r > 0)) return;
+  c2.globalAlpha = alpha === undefined ? 1 : alpha;
+  c2.drawImage(img, x - r, y - r, r*2, r*2);
+  c2.globalAlpha = 1;
+}
+function hole(cx, cy, r, soft){
+  stamp(fog, (soft ?? .55) > .35 ? BLOB_HARD : BLOB_SOFT, cx, cy, r);
+}
+function drawFog(t){
+  if (fogCv.width !== W || fogCv.height !== H){ fogCv.width = W; fogCv.height = H; }
+  fog.setTransform(1,0,0,1,0,0);
+  fog.globalCompositeOperation = "source-over";
+  fog.clearRect(0,0,W,H);
+
+  // the wool itself: several layers of it, drifting downwind
+  fog.fillStyle = "#5c6b78";
+  fog.globalAlpha = .96;
+  fog.fillRect(0,0,W,H);
+  fog.globalAlpha = 1;
+  const r = (env.windFrom + 180) * Math.PI/180;
+  const ux = Math.sin(r), uy = -Math.cos(r);
+  for (let i=0;i<26;i++){
+    const ph = (t*.045*(1+(i%4)*.35) + i*.137) % 1;
+    const bx = ((i*137)%100)/100*W + ux*ph*W*1.3 - ux*W*.15;
+    const by = ((i*271)%100)/100*H + uy*ph*H*1.3 - uy*H*.15;
+    const rr = 90 + (i%5)*70;
+    stamp(fog, BLOB_WOOL, bx%W, by%H, rr, .55);
+  }
+
+  // now punch out what you can actually see
+  fog.globalCompositeOperation = "destination-out";
+
+  // your own circle: a schooner's deck, her lamps, and as far as that carries
+  hole(T.X(ship.x), T.Y(ship.y), T.S(230) + 60, .30);
+
+  // the lights. Point Bonita throws the big one, as it was built to.
+  for (const L of G.LIGHTS){
+    let on = 1;
+    if (L.period) on = (t % L.period) < L.period*.72 ? 1 : .35;
+    if (!onScreen(L.x, L.y, T.S(L.range * G.COMPRESS))) continue;
+    const rr = T.S(L.range * G.COMPRESS * .62) * on;   // the chart is compressed
+    if (rr < 4) continue;
+    hole(T.X(L.x), T.Y(L.y), rr, .18);
+  }
+  // the towns ashore, which glow through it
+  for (const b2 of G.BUILDINGS){ if (!onScreen(b2.x, b2.y, T.S(200))) continue;
+    hole(T.X(b2.x), T.Y(b2.y), T.S(150), .2); }
+  hole(T.X(G.FERRY_BUILDING.x), T.Y(G.FERRY_BUILDING.y), T.S(320), .25);
+  hole(T.X(G.WHARF.x), T.Y(G.WHARF.y), T.S(170), .25);
+
+  // every vessel carries her own small pool, so she looms
+  for (const v of traffic){
+    if (!Number.isFinite(v.x) || !onScreen(v.x, v.y, T.S(v.len*2) + 60)) continue;
+    hole(T.X(v.x), T.Y(v.y), T.S(v.len*1.5) + 26, .22); }
+  for (const a2 of ANCHORAGE){ if (!onScreen(a2.x, a2.y, T.S(140))) continue;
+    hole(T.X(a2.x), T.Y(a2.y), T.S(70) + 14, .25); }
+
+  fog.globalCompositeOperation = "source-over";
+  ctx.drawImage(fogCv, 0, 0);
+
+  // a last breath of it over everything, so nothing looks crisp
+  ctx.globalAlpha = .07; ctx.fillStyle = "#8ea0ae";
+  ctx.fillRect(0,0,W,H); ctx.globalAlpha = 1;
+}
+
+// the lantern each vessel carries, drawn under her so she glows first
+function drawLanterns(){
+  for (const v of traffic){
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) continue;
+    if (!onScreen(v.x, v.y, T.S(v.len*2))) continue;
+    stamp(ctx, BLOB_LAMP, T.X(v.x), T.Y(v.y), Math.max(20,T.S(v.len*1.4)), .30);
+  }
+  stamp(ctx, BLOB_LAMP, T.X(ship.x), T.Y(ship.y), Math.max(30, T.S(90)), .22);
+}
+
+// rocks along both shores, which you meet before you meet the shore
+function drawShoreRocks(t){
+  for (const rk of G.SHORE_ROCKS){
+    const x=T.X(rk.x), y=T.Y(rk.y);
+    if (x<-60||x>W+60||y<-60||y>H+60) continue;
+    const brk = rk.awash ? (.35+.65*Math.max(0,Math.sin(t*.8+rk.x*.03))) : .55;
+    ctx.globalAlpha=.10+.3*brk; ctx.fillStyle=C.foam;
+    ctx.beginPath(); ctx.ellipse(x,y,T.S(rk.r*1.7),T.S(rk.r*1.3),0,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=1;
+    if (!rk.shape) rk.shape = rockShape(rk.seed, rk.r);
+    ctx.beginPath();
+    ctx.moveTo(x+T.S(rk.shape[0][0]), y+T.S(rk.shape[0][1]));
+    for (const [sx,sy] of rk.shape) ctx.lineTo(x+T.S(sx), y+T.S(sy));
+    ctx.closePath();
+    ctx.fillStyle = rk.awash ? "#2b3742" : "#39444d"; ctx.fill();
+    ctx.strokeStyle="rgba(12,17,23,.7)"; ctx.lineWidth=Math.max(1,T.S(.6)); ctx.stroke();
+  }
+}
+
+// ------------------------------------------------------------- phases
+let canMoor = false;
+function unload(){
+  phase="over";
+  card(`<h1>Discharged</h1>
+  <p>You are alongside at Steuart Street with <b>${Math.floor(ship.cargo)} cords</b> out of
+  Fort Ross, and the Ferry Building clock going overhead.
+  ${tows ? `You took a tug ${tows === 1 ? "once" : tows + " times"}, and the towage comes off what she made.` : "You worked her in under your own canvas the whole way."}</p>
+  <p class="src">Mendocino and Sonoma cordwood and lumber came in here by the schooner-load:
+  Cronise put the price in 1868 at twenty dollars a thousand feet rough and thirty dressed.
+  Six months after this night the waterfront you have just come into burned.</p>
+  <div class="go">Enter to sail again &nbsp;&middot;&nbsp; Esc for the title screen</div>`);
+}
+let wreck = null;
+function fail(t2,d2){
+  if (phase==="over" || phase==="wrecking") return;
+  const fx=Math.sin(ship.hdg), fy=-Math.cos(ship.hdg);
+  wreck = { t:0, title:t2, detail:d2,
+    halves:[
+      {x:ship.x+fx*7,y:ship.y+fy*7,hdg:ship.hdg,half:"fore",
+       vx:ship.vx*.5+fy*.35,vy:ship.vy*.5-fx*.35,om:.22,sink:0},
+      {x:ship.x-fx*7,y:ship.y-fy*7,hdg:ship.hdg,half:"aft",
+       vx:ship.vx*.5-fy*.3,vy:ship.vy*.5+fx*.3,om:-.3,sink:0},
+    ],
+    debris: Array.from({length: 18 + Math.floor(ship.cargo*1.4)}, (_,i)=>({
+      x:ship.x+(Math.random()-.5)*26, y:ship.y+(Math.random()-.5)*26,
+      vx:(Math.random()-.5)*4, vy:(Math.random()-.5)*4,
+      a:Math.random()*6.28, om:(Math.random()-.5)*1.4,
+      len:3+Math.random()*5, lumber:i>=18 })),
+  };
+  phase="wrecking";
+}
+function wreckStep(dt){
+  const w=wreck; if(!w) return; w.t+=dt;
+  for(const h of w.halves){
+    h.x+=(h.vx+env.curX*2)*dt; h.y+=(h.vy+env.curY*2)*dt;
+    h.vx*=(1-dt*.55); h.vy*=(1-dt*.55);
+    h.hdg+=h.om*dt; h.om*=(1-dt*.5);
+    if(w.t>1.6) h.sink=Math.min(1,h.sink+dt*.17);
+  }
+  for(const d3 of w.debris){
+    d3.x+=(d3.vx+env.curX*3)*dt; d3.y+=(d3.vy+env.curY*3)*dt;
+    d3.vx*=(1-dt*.8); d3.vy*=(1-dt*.8); d3.a+=d3.om*dt; d3.om*=(1-dt*.6);
+  }
+  if (w.t>7.2) endWreck();
+}
+function drawWreck(){
+  const w=wreck; if(!w) return;
+  ctx.globalAlpha=Math.max(0,.5-w.t*.12); ctx.fillStyle=C.foam;
+  ctx.beginPath();
+  ctx.ellipse(T.X(w.halves[0].x),T.Y(w.halves[0].y),
+              T.S(16+w.t*22),T.S(12+w.t*17),0,0,Math.PI*2); ctx.fill();
+  ctx.globalAlpha=1;
+  for(const d3 of w.debris){
+    ctx.save(); ctx.translate(T.X(d3.x),T.Y(d3.y)); ctx.rotate(d3.a);
+    ctx.fillStyle=d3.lumber?C.timber:"#1d2731";
+    ctx.fillRect(T.S(-d3.len/2),T.S(-.7),T.S(d3.len),T.S(1.4));
+    ctx.restore();
+  }
+  for(const h of w.halves){
+    const L=28,B=8.6;
+    ctx.save(); ctx.translate(T.X(h.x),T.Y(h.y)); ctx.rotate(h.hdg);
+    ctx.globalAlpha=1-h.sink;
+    const sc=1-h.sink*.35, b=B/2*sc, l=L/2*sc;
+    ctx.beginPath();
+    if(h.half==="fore"){
+      ctx.moveTo(0,T.S(-l-2));
+      ctx.bezierCurveTo(T.S(b*.85),T.S(-l*.5),T.S(b),T.S(l*.1),T.S(b*.5),T.S(l*.2));
+      ctx.lineTo(T.S(-b*.7),T.S(l*.05));
+      ctx.bezierCurveTo(T.S(-b),T.S(-l*.2),T.S(-b*.85),T.S(-l*.5),0,T.S(-l-2));
+    } else {
+      ctx.moveTo(T.S(-b*.6),T.S(-l*.1)); ctx.lineTo(T.S(b*.75),T.S(-l*.25));
+      ctx.lineTo(T.S(b*.72),T.S(l)); ctx.lineTo(T.S(-b*.72),T.S(l)); ctx.closePath();
+    }
+    ctx.fillStyle="#0d131a"; ctx.fill();
+    ctx.strokeStyle="rgba(150,168,182,.35)"; ctx.lineWidth=Math.max(1,T.S(.8)); ctx.stroke();
+    ctx.strokeStyle="#2a2118"; ctx.lineWidth=Math.max(1,T.S(1));
+    ctx.beginPath(); ctx.moveTo(0,0);
+    ctx.lineTo(T.S(b*2.6*(h.half==="fore"?1:-1)),T.S(l*1.3)); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.globalAlpha=1;
+}
+function endWreck(){
+  const t2=wreck.title, d2=wreck.detail; phase="over";
+  card(`<h1>${t2}</h1><p>${d2}</p>
+  <p class="src">The Gate took plenty. The City of Rio de Janeiro struck Mile Rocks in
+  the fog on 22 February 1901 and went down in ten minutes with 128 lost, which is why
+  there was a lighthouse on them by 1906.</p>
+  <div class="go">Enter to try again &nbsp;&middot;&nbsp; Esc for the title screen</div>`); }
+
+function phases(dt){
+  const d = Math.hypot(ship.x-G.BERTH.x, ship.y-G.BERTH.y);
+  if (dev){
+    if (ship.x > G.LIME_POINT.x + 600 && phase==="gate") phase="bay";
+    if (ship.x > G.FORT_MASON.x + 800 && phase==="bay") phase="city";
+    if (phase==="city" && d < 700) phase="berth";
+    canMoor = phase==="berth" && d < G.BERTH.tol;
+    return;
+  }
+  if (phase==="gate" && ship.x > G.LIME_POINT.x + 600) phase="bay";
+  if (phase==="bay" && ship.x > G.FORT_MASON.x + 800) phase="city";
+  if (phase==="city" && d < 700) phase="berth";
+  canMoor = phase==="berth" && d < G.BERTH.tol && ship.speedKn < 3.4;
+  // rock
+  // Her hull is 28 yards long and 8 wide. Testing a circle round her middle
+  // either let her bow pass through a rock or stopped her a length short of
+  // one. The test is now her CENTRELINE against the rock, plus half her beam.
+  const hb = 28 * .46, beam = 8.6 * .5;
+  const bowX = ship.x + Math.sin(ship.hdg)*hb, bowY = ship.y - Math.cos(ship.hdg)*hb;
+  const stnX = ship.x - Math.sin(ship.hdg)*hb, stnY = ship.y + Math.cos(ship.hdg)*hb;
+  const toHull = (px, py) => {
+    const dx = stnX-bowX, dy = stnY-bowY, L2 = dx*dx+dy*dy || 1;
+    let u = ((px-bowX)*dx + (py-bowY)*dy) / L2;
+    u = Math.max(0, Math.min(1, u));
+    return Math.hypot(px - (bowX+dx*u), py - (bowY+dy*u));
+  };
+  for (const h of G.HAZARDS.concat(G.SHORE_ROCKS)){
+    if (toHull(h.x, h.y) < h.r + beam){
+      fail("On the rocks", `You went onto ${h.name} at ${ship.speedKn.toFixed(1)} knots in the fog.`);
+      return;
+    }
+  }
+  // and against another vessel it is hull to hull, the same test the AI
+  // uses on itself, so a ferry's bow can graze your stern without it
+  // counting as running you down
+  for (const v of traffic){
+    const gap = hullGap({len:28}, v.x, v.y, v.hdg, v.len, ship.x, ship.y, ship.hdg);
+    if (gap < (beamOf(v.len) + beam)){
+      fail("Run down", `${v.name} came out of the fog and cut you down. She did not see you,
+        and in any case she would not have given way.`);
+      return;
+    }
+  }
+  if (dev) return;                       // in the workshop nothing kills you
+  // the shore. Sail into it and you are ashore, which was the usual end.
+  const gr = onLand(ship.x, ship.y) || onLand(bowX, bowY) || onLand(stnX, stnY);
+  if (gr){
+    fail("Ashore", `You ran her up on ${gr} at ${ship.speedKn.toFixed(1)} knots in the fog.`);
+    return;
+  }
+}
+
+// -------------------------------------------------------------- loop
+let last = performance.now();
+function frame(now){
+  const dt = Math.min((now-last)/1000,.05); last=now;
+  try {
+  if (phase==="wrecking"){ weatherStep(dt); trafficStep(dt); wreckStep(dt); }
+  const live = phase!=="brief" && phase!=="over" && phase!=="wrecking";
+  if (live){
+    elapsed += dt;
+    weatherStep(dt); trafficStep(dt); spotting(dt);
+    hornStep(dt); bellStep(dt);
+    ship.helm = (keys["arrowleft"]?-1:0)+(keys["arrowright"]?1:0);
+    if (keys["arrowup"]) ship.canvas = Math.min(1, ship.canvas+dt*1.3);
+    if (keys["arrowdown"]) ship.canvas = Math.max(0, ship.canvas-dt*1.3);
+    if (dev){
+      // straight kinematics, no sails, no tide: this is not the game, it is
+      // the workshop
+      if (keys["arrowleft"])  ship.hdg -= dt*2.4;
+      if (keys["arrowright"]) ship.hdg += dt*2.4;
+      const thrust = keys["arrowup"] ? 46 : keys["arrowdown"] ? -18 : 0;
+      ship.vx = Math.sin(ship.hdg)*thrust*KN;
+      ship.vy = -Math.cos(ship.hdg)*thrust*KN;
+      ship.x += ship.vx*dt*7; ship.y += ship.vy*dt*7;
+      ship.speedKn = Math.abs(thrust); ship.throughKn = ship.speedKn;
+      ship.canvas = 1; ship.inIrons = false; ship.boomSide = 1; ship.driveNow = .6;
+    } else
+    for (let i=0;i<10;i++) step(ship, env, dt);   // she steps out on this leg
+    if (tow){
+      const tx = G.BERTH.x - ship.x, ty = G.BERTH.y - ship.y;
+      const d3 = Math.hypot(tx,ty) || 1;
+      ship.vx += (tx/d3) * 1.9 * dt;  ship.vy += (ty/d3) * 1.9 * dt;
+      ship.vx *= (1 - dt*.5);         ship.vy *= (1 - dt*.5);
+      ship.hdg += ((Math.atan2(tx,-ty) - ship.hdg + Math.PI*3) % (Math.PI*2) - Math.PI) * dt * 1.4;
+    }
+    wakeStep(dt);
+    phases(dt);
+  }
+  } catch (err) {
+    window.__simErr = window.__simErr || [];
+    if (window.__simErr.length < 12) window.__simErr.push(String(err));
+  }
+  cam.span += ((SPAN[phase]||1200)-cam.span)*Math.min(1,dt*1.1);
+  cam.x += (ship.x+ship.vx*1.5-cam.x)*Math.min(1,dt*3.2);
+  cam.y += (ship.y+ship.vy*1.5-cam.y)*Math.min(1,dt*3.2);
+  T.k = W/Math.max(60, cam.span);
+
+  // ⚠ ONE BAD DRAW MUST NOT STOP THE LOOP. An uncaught throw inside frame()
+  // kills requestAnimationFrame for good, and that is what a freeze looks
+  // like. Anything that fails is recorded and the game carries on.
+  try {
+    ctx.fillStyle="#131e28"; ctx.fillRect(0,0,W,H);
+    drawSwell(env.t); drawFlecks(env.t); drawWind(env.t);
+    drawShores(); drawIslands(); drawTown(); drawWaterfront();
+    drawBatteries(env.t); drawLighthouses(); drawFortPoint(); drawFerryBuilding(); drawWharf(env.t);
+    drawShoreRocks(env.t); drawHazards(env.t);
+    drawLanterns(); drawTraffic(env.t); drawLights(env.t);
+    drawWake();
+    if (phase==="wrecking" || (phase==="over" && wreck)) drawWreck();
+    else drawVessel(ctx, T, ship, env.t, C);
+    drawFog(env.t);
+    if (phase!=="brief"){ drawBearings(); drawRose(); drawMinimap(); }
+  } catch (err) {
+    window.__drawErr = window.__drawErr || [];
+    if (window.__drawErr.length < 12) window.__drawErr.push(String(err));
+  }
+  // ⚠ hud() WAS OUTSIDE THE GUARD, and that is what the freezing was: a
+  // throw in the readout stopped the loop being asked for another frame,
+  // the whole game stood still, and nothing was recorded because the
+  // catch above never saw it. The request is now made no matter what.
+  try { hud(); } catch (err) {
+    window.__hudErr = window.__hudErr || [];
+    if (window.__hudErr.length < 12) window.__hudErr.push(String(err));
+  }
+  requestAnimationFrame(frame);
+}
+function pts(deg){ const n=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return n[Math.round(((deg%360)+360)%360/22.5)%16]; }
+function hud(){
+  el("phase").textContent = {gate:"The Gate", bay:"Inside", city:"The city front",
+    berth:"Alongside", over:"", brief:""}[phase]||"";
+  el("order").textContent = {
+    gate:"Point Bonita is your mark. Mile Rocks has no light on it. The tide through the narrows is the strongest thing here.",
+    bay:"Inside now. Keep Alcatraz to port and mind what is at anchor in the stream.",
+    city:"The ferries run all day and will not give way to you. Work up to the lumber wharf.",
+    berth:"Come alongside slow and make fast. Space.",
+    over:""}[phase]||"";
+  el("nav").innerHTML = `
+    <div>Head <b>${pts(degOf(ship.hdg))} ${degOf(ship.hdg).toFixed(0)}&deg;</b></div>
+    <div>Speed <b>${ship.speedKn.toFixed(1)} kn</b></div>
+    <div>Wind <b>${pts(env.windFrom)} ${env.windKn.toFixed(0)} kn</b></div>
+    <div>Tide <b>${env.flood?"flooding":"ebbing"}</b> ${(env.setKn||0).toFixed(1)} kn</div>
+    <div class="a">Fog, and no moon</div>`;
+  el("sail").innerHTML = `<div>Canvas <b>${(ship.canvas*100).toFixed(0)}%</b></div>
+    ${dev?'<div class="g">DEV &mdash; &#96; to leave it. No wind, no tide, four times her speed.</div>':""}
+    <div>${tow?'<span class="a">A tug has you in tow. T to cast her off.</span>'
+              :'<span class="k">T &mdash; take a tug (it costs you)</span>'}</div>
+    <div>${ship.inIrons?'<span class="r">In irons. Bear away.</span>':
+      ship.throughKn<.6?'<span class="a">No way on</span>':'Helm answering'}</div>`;
+  el("cargo").innerHTML = `<div>Cargo <b>${Math.floor(ship.cargo)}</b> cords</div>
+    ${canMoor?'<div class="g">SPACE &mdash; make fast and discharge</div>':""}`;
+}
+window.__probe = onLand;
+// sound them on demand, to check they are audible
+window.__ring = (v) => playClip(bellBuf, v || 1);
+window.__horn = (v) => playClip(hornBuf, v || 1);
+window.__dev = { get traffic(){return traffic;}, get ship(){return ship;},
+  get cam(){return cam;}, get T(){return T;}, get phase(){return phase;}, get env(){return env;},
+  put(x,y,h,c){ ship.x=x;ship.y=y;ship.hdg=(h||0)*Math.PI/180;ship.vx=0;ship.vy=0;ship.canvas=c||0; },
+  berth(){ this.put(G.BERTH.x, G.BERTH.y, G.BERTH.hdg, 0); } };
+requestAnimationFrame(frame);
+</script>

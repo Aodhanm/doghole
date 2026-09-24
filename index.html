@@ -1,0 +1,1341 @@
+<meta charset="utf-8">
+<script>
+  window.__bootErr = [];
+  addEventListener("error", e => window.__bootErr.push(
+    (e.message || "err") + " @ " + (e.filename||"?") + ":" + (e.lineno||"?")));
+  addEventListener("unhandledrejection", e => window.__bootErr.push("reject: " + e.reason));
+</script>
+<title>Doghole &mdash; title screen</title>
+<style>
+  :root {
+    --ink:      #0b1016;
+    --paper:    #dfe6ec;
+    --dim:      rgba(223,230,236,.55);
+    --amber:    #f2a63c;
+    --green:    #7fe0a8;
+    --display: Trattatello, Luminari, "Academy Engraved LET",
+      "Iowan Old Style", Palatino,
+               "Book Antiqua", Georgia, serif;
+    --dscale: 1.62;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--ink); color: var(--paper);
+    font-family: var(--mono); overflow: hidden;
+  }
+  #stage { position: relative; width: 100%; height: 100vh;
+           min-height: 480px; overflow: hidden; background: var(--ink); }
+  canvas#scene { position: absolute; inset: 0; width: 100%; height: 100%;
+                 display: block; }
+  .grade { position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(125% 95% at 48% 44%,
+      rgba(0,0,0,0) 34%, rgba(11,16,22,.34) 72%, rgba(11,16,22,.72) 100%); }
+
+  .plate { position: absolute; inset: 0; display: grid;
+    grid-template-rows: auto 1fr;
+    padding: clamp(14px, 2.4vw, 34px) clamp(16px, 3vw, 44px)
+             clamp(26px, 3vw, 40px);
+    pointer-events: none; }
+
+  .credit { font-size: clamp(10px, .9vw, 13px); letter-spacing: .14em;
+    line-height: 1.95; }
+  .credit .v { color: var(--amber); }
+  .credit .p { color: var(--dim); }
+
+  .titleblock { align-self: end; max-width: min(58ch, 70%);
+    margin-bottom: clamp(40px, 10vh, 112px);
+    display: flex; flex-direction: column; gap: clamp(6px, .8vw, 12px); }
+
+  .eyebrow { font-size: clamp(12px, 1.12vw, 17px); letter-spacing: .1em;
+    white-space: nowrap; color: var(--amber);
+    display: flex; align-items: center; gap: .9em; }
+  .eyebrow::after { content: ""; flex: 1; height: 1px;
+    background: linear-gradient(90deg, rgba(242,166,60,.6), rgba(242,166,60,0)); }
+
+  h1 { margin: 0; font-family: var(--display); font-weight: 400;
+    font-size: calc(clamp(36px, 6.9vw, 104px) * var(--dscale, 1));
+    line-height: .9;
+    letter-spacing: -.008em; text-wrap: balance; color: #f2f6f9;
+    text-shadow: 0 2px 0 rgba(11,16,22,.8), 0 0 42px rgba(120,170,210,.30),
+                 0 18px 54px rgba(11,16,22,.85); }
+
+  .landing { display: flex; align-items: baseline; gap: .85em; flex-wrap: wrap;
+    margin-top: .5em; font-size: clamp(14px, 1.25vw, 19px); letter-spacing: .06em;
+    color: var(--amber); }
+  .landing i { font-style: normal; letter-spacing: .18em; color: var(--dim); }
+  .landing i::before { content: "\00b7"; margin-right: .85em; color: rgba(242,166,60,.55); }
+
+  .standfirst { margin: 0; max-width: 38ch; font-family: var(--display);
+    text-shadow: 0 1px 3px rgba(11,16,22,.9), 0 0 16px rgba(11,16,22,.7);
+    font-size: clamp(13px, 1.1vw, 16px); line-height: 1.52;
+    color: rgba(223,230,236,.8); }
+
+  .controls { display: flex; align-items: center; gap: 10px;
+    pointer-events: auto; margin-top: 4px; }
+  button { font-family: var(--mono); font-size: clamp(10px, .8vw, 11px);
+    letter-spacing: .08em; color: #f2f6f9;
+    background: rgba(11,16,22,.55); border: 1px solid rgba(223,230,236,.28);
+    padding: .8em 1.4em; cursor: pointer;
+    transition: background .16s, border-color .16s, color .16s; }
+  button:hover, button:focus-visible { background: rgba(242,166,60,.22);
+    border-color: var(--amber); color: #fff; }
+  button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  button.ghost { background: transparent; border-color: rgba(223,230,236,.16);
+    color: var(--dim); letter-spacing: .14em; padding: .74em 1.05em; }
+  button.ghost:hover, button.ghost:focus-visible {
+    border-color: rgba(223,230,236,.42); color: #f2f6f9;
+    background: rgba(11,16,22,.5); }
+  .controls button { white-space: nowrap; }
+  .namecount { white-space: nowrap; font-size: clamp(9px, .7vw, 10px); letter-spacing: .18em;
+    color: rgba(223,230,236,.4); font-variant-numeric: tabular-nums; }
+
+  .bottombar { display: flex; justify-content: space-between;
+    align-items: flex-end; gap: 18px; }
+  .caption { font-size: clamp(8px, .68vw, 10px); line-height: 1.75;
+    letter-spacing: .03em; color: rgba(223,230,236,.44);
+    max-width: 40ch; text-align: right; margin: 0 0 0 auto; }
+  .caption b { color: rgba(223,230,236,.7); font-weight: 600; }
+
+  .hints { position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; gap: clamp(10px, 2vw, 30px); flex-wrap: wrap;
+    padding: 7px clamp(16px, 3vw, 44px);
+    font-size: clamp(8px, .7vw, 10px); letter-spacing: .16em;
+    text-transform: uppercase; color: var(--green);
+    background: linear-gradient(180deg, rgba(11,16,22,0), rgba(11,16,22,.88));
+    pointer-events: none; }
+  .hints b { color: #cfeede; font-weight: 400; }
+
+  #curtain { position: absolute; inset: 0; display: grid; place-content: center;
+    gap: 16px; justify-items: center; background: var(--ink); z-index: 6;
+    transition: opacity 1.4s ease; cursor: pointer; }
+  #curtain.gone { opacity: 0; pointer-events: none; }
+  #curtain .mark { font-family: var(--display);
+    font-size: clamp(30px, 5.4vw, 62px); color: #f2f6f9; letter-spacing: .01em; }
+  #curtain p { margin: 0; font-size: 13px; letter-spacing: .12em;
+    color: var(--amber); }
+
+  @media (prefers-reduced-motion: reduce) { #curtain, button { transition: none; } }
+  @media (max-width: 760px) {
+    .titleblock { max-width: 94%; }
+    .caption, .hints { display: none; }
+  }
+</style>
+
+<div id="stage">
+  <canvas id="scene"></canvas>
+  <div class="grade"></div>
+
+  <div class="plate">
+    <div class="credit">
+      <div>Made by Aodhan</div>
+      <div class="v">MMXXVI &nbsp;&middot;&nbsp; v0.1</div>
+      <div class="p">Scene: Fort Ross Cove</div>
+      <div class="p" id="faceline">Type: Trattatello</div>
+    </div>
+
+    <div class="titleblock">
+      <div class="eyebrow" id="eyebrow">Barely room for a dog to turn around</div>
+      <h1 id="gametitle">Doghole</h1>
+      <div class="landing"><span id="landingname">Fort Ross Cove</span><i id="landingwhere">Sonoma Coast</i></div>
+      <div class="controls">
+        <button id="begin" type="button">Press enter to begin</button>
+      </div>
+    </div>
+
+    <!-- bottom-right caption removed 2026-09-22: the screen carries less now -->
+  </div>
+
+  <!-- hint row removed 2026-09-22: nothing along the bottom -->
+
+  <div id="curtain">
+    <span class="mark" id="curtainmark">Doghole</span>
+    <p>Click to begin &middot; sound on</p>
+  </div>
+</div>
+
+<audio id="theme" src="theme.m4a" loop preload="auto"></audio>
+
+<script type="module">
+import { drawSchooner } from "./ship.js";
+
+// THE TITLE IS LOCKED: Doghole. Aodhan chose it 2026-09-21.
+// N no longer cycles candidate titles, it cycles the LANDING under the title.
+// Every landing below is documented; sources are the 1889 Coast Pilot (via the
+// vault gazetteers) and the NRHP doghole MPDF. Do not add an invented one.
+const TITLE  = "Doghole";
+const TAGLINE = "Barely room for a dog to turn around";
+
+const LANDINGS = [
+  { t: "Fort Ross Cove", w: "Sonoma Coast",
+    s: "No wharf to lie to. She moors to buoys and to iron rings leaded into the shore rocks." },
+  { t: "Hardscratch", w: "Mendocino Coast",
+    s: "A real name for a real landing, later dressed up as Signal Port." },
+  { t: "Nip and Tuck", w: "Mendocino Coast",
+    s: "Six vessels loaded here in all of 1883, and the name is the odds." },
+  { t: "Rough and Ready", w: "Iversen Point",
+    s: "The sea took this chute three times. In 1885 they were putting it up again." },
+  { t: "Mal Paso", w: "Mendocino Coast",
+    s: "Bad crossing. A slot seventy yards wide, one vessel at a time." },
+  { t: "Bromley Gulch", w: "Mendocino Coast",
+    s: "Built in 1884 and never once used. Nobody ever set the moorings." },
+  { t: "Slide Rock", w: "Mendocino Coast",
+    s: "The proprietor's name is on the charts. This is the name that stuck." },
+  { t: "Uncle Abe's", w: "below Greenwood",
+    s: "Pulled down before the 1889 survey reached it. Its only entry is its obituary." },
+  { t: "Devilbliss", w: "location unknown",
+    s: "It worked in 1895 and 1896, and no one now knows where on the coast it stood." },
+];
+
+// RETIRED title candidates, kept for the record. All were sourced; Doghole won.
+// Lumber Reef (the reef you take in to carry more) - Burthen (what a ship is
+// measured in) - Out Harbor (no bar, no shelter, no inside) - Ringbolt (iron
+// leaded into the rock) - Ground Chain (the chain that parts in a southerly) -
+// The Traveler (the carrier that runs down the wire) - Swing Apron (the last
+// ninety feet, out over the water) - Counterweight (the only thing that comes
+// back up) - The Clapper (a movable plank at the end of the chute).
+// NOT sourced, never use: Gallows Frame, Clapperman, Cape Stiff.
+
+const cv  = document.getElementById("scene");
+const ctx = cv.getContext("2d", { alpha: false });
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const VW = 1600, VH = 900;
+let scale = 1, ox = 0, oy = 0, W = 0, H = 0;
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.max(W / VW, H / VH);
+  ox = (W - VW * scale) / 2; oy = (H - VH * scale) / 2;
+}
+addEventListener("resize", resize);
+const X = x => ox + x * scale;
+const Y = y => oy + y * scale;
+const S = v => v * scale;
+
+function mulberry(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function fbm(seed) {
+  const r = mulberry(seed), tab = Array.from({ length: 256 }, r);
+  return function (x) {
+    let v = 0, amp = 1, f = 1, norm = 0;
+    for (let o = 0; o < 4; o++) {
+      const xi = x * f, i = Math.floor(xi), fr = xi - i;
+      const a = tab[i & 255], b = tab[(i + 1) & 255];
+      const sm = fr * fr * (3 - 2 * fr);
+      v += (a + (b - a) * sm) * amp; norm += amp; amp *= .5; f *= 2.1;
+    }
+    return v / norm;
+  };
+}
+const ridgeN = fbm(11), cliffN = fbm(23), headN = fbm(41), foreN = fbm(67);
+
+const C = {
+  hull: "#10161e", hullTop: "#1c2530", hullStripe: "#5d6d7c",
+  house: "#1a232e", houseRoof: "#2b3744", spar: "#2a2118",
+  rig: "rgba(196,210,222,.45)", canvas: "#7d8590",
+  timber: "#c8781f", timberLit: "#f2a63c", lamp: "#ffc46e",
+  foam: "#cfdae2", buoy: "#c8781f",
+};
+const P = { X, Y, S, C };
+
+const HZ = 318;
+
+const rainNear = [], rainFar = [], dimples = [];
+(() => {
+  const r = mulberry(7);
+  const nN = reduced ? 90 : 460, nF = reduced ? 120 : 680;
+  for (let i = 0; i < nN; i++)
+    rainNear.push({ x: r()*(VW+400)-200, y: r()*VH, len: 26+r()*40, sp: 17+r()*11 });
+  for (let i = 0; i < nF; i++)
+    rainFar.push({ x: r()*(VW+400)-200, y: r()*VH, len: 10+r()*16, sp: 8+r()*6 });
+  for (let i = 0; i < (reduced ? 30 : 150); i++)
+    dimples.push({ x: r()*VW, y: HZ+30+r()*430, sp: .6+r()*1.2, ph: r()*6 });
+})();
+
+const ROCKS = (() => {
+  const r = mulberry(91), out = [];
+  const spots = [
+    [1052, 640, 22], [1004, 672, 15], [1120, 664, 19], [1176, 628, 13],
+    [600, 656, 25], [528, 684, 18], [456, 704, 14], [388, 678, 11],
+    [322, 712, 16], [690, 690, 13], [258, 686, 9], [1224, 674, 11],
+    [172, 718, 12], [1290, 700, 15],
+  ];
+  for (const [x, y, rad] of spots)
+    out.push({ x, y, r: rad, seed: (r()*9999)|0, ph: r()*Math.PI*2 });
+  return out;
+})();
+
+const GULLS = Array.from({ length: 7 }, (_, i) => ({
+  x: 180 + i * 190, y: 244 + (i % 3) * 44, sp: 9 + i * 2.2, ph: i * 1.3,
+}));
+
+const bundles = []; let nextBundle = 2.0;
+
+function jaggedTop(fn, x0, x1, step, baseY, amp, freq, phase) {
+  const pts = [];
+  for (let x = x0; x <= x1; x += step) {
+    const t = (x - x0) / (x1 - x0);
+    pts.push([x, baseY + (fn((x + phase) * freq) - .5) * amp * (.35 + t * .9)]);
+  }
+  return pts;
+}
+function fillPoly(pts, closeY, color) {
+  ctx.beginPath();
+  ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(X(pts[i][0]), Y(pts[i][1]));
+  ctx.lineTo(X(pts[pts.length-1][0]), Y(closeY));
+  ctx.lineTo(X(pts[0][0]), Y(closeY));
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+}
+function haze(a, b, col, aa, ab) {
+  const g = ctx.createLinearGradient(0, Y(a), 0, Y(b));
+  g.addColorStop(0, "rgba(" + col + "," + aa + ")");
+  g.addColorStop(1, "rgba(" + col + "," + ab + ")");
+  ctx.fillStyle = g; ctx.fillRect(0, Y(a), W, S(b - a));
+}
+
+
+// A fence is posts AND rails. Posts alone read as a row of sticks.
+function fence(x0, x1, yfn, n, lift, col, lw) {
+  const xs = [];
+  for (let i = 0; i <= n; i++) xs.push(x0 + (x1 - x0) * (i / n));
+  ctx.strokeStyle = col;
+  ctx.lineWidth = Math.max(1, S(lw));
+  for (const rail of [0.30, 0.62, 0.92]) {
+    ctx.beginPath();
+    for (let i = 0; i < xs.length; i++) {
+      const yy = yfn(xs[i]) - lift * rail;
+      if (i === 0) ctx.moveTo(X(xs[i]), Y(yy)); else ctx.lineTo(X(xs[i]), Y(yy));
+    }
+    ctx.stroke();
+  }
+  ctx.lineWidth = Math.max(1, S(lw * 1.5));
+  for (const xx of xs) {
+    const yy = yfn(xx);
+    ctx.beginPath();
+    ctx.moveTo(X(xx), Y(yy + 3));
+    ctx.lineTo(X(xx), Y(yy - lift));
+    ctx.stroke();
+  }
+}
+
+function drawSky(t) {
+  const g = ctx.createLinearGradient(0, Y(-40), 0, Y(HZ + 24));
+  g.addColorStop(0, "#161d27"); g.addColorStop(.38, "#2c3948");
+  g.addColorStop(.74, "#566575"); g.addColorStop(1, "#8b98a6");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, Y(HZ + 26));
+
+  const n = fbm(501);
+  for (let L = 0; L < 3; L++) {
+    const yy = 24 + L * 62, drift = (t * (4 + L * 3.4)) % (VW + 800) - 400;
+    ctx.beginPath();
+    ctx.moveTo(X(-80), Y(-90));
+    for (let x = -80; x <= VW + 80; x += 20)
+      ctx.lineTo(X(x), Y(yy + (n((x + drift) * .0042 + L) - .5) * 92));
+    ctx.lineTo(X(VW + 80), Y(-90));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(18,25,34," + (.3 + L * .16) + ")";
+    ctx.fill();
+  }
+  const br = ctx.createRadialGradient(X(1020), Y(276), 0, X(1020), Y(276), S(430));
+  br.addColorStop(0, "rgba(206,216,226,.32)");
+  br.addColorStop(1, "rgba(206,216,226,0)");
+  ctx.fillStyle = br; ctx.fillRect(0, 0, W, Y(HZ + 20));
+}
+
+function drawGulls(t) {
+  ctx.strokeStyle = "rgba(216,226,234,.5)";
+  ctx.lineWidth = Math.max(1, S(1.3));
+  for (const g of GULLS) {
+    const gx = ((g.x + t * g.sp) % (VW + 200)) - 100;
+    const gy = g.y + Math.sin(t * .8 + g.ph) * 13;
+    const f = Math.sin(t * 3.4 + g.ph) * 4;
+    ctx.beginPath();
+    ctx.moveTo(X(gx - 7), Y(gy + f));
+    ctx.quadraticCurveTo(X(gx), Y(gy - 3), X(gx + 7), Y(gy + f));
+    ctx.stroke();
+  }
+}
+
+function drawFarRidge(t) {
+  const pts = jaggedTop(ridgeN, -80, VW + 80, 16, 258, 70, .0055, 0);
+  fillPoly(pts, HZ + 30, "#1d2731");
+  ctx.fillStyle = "#18212a";
+  const r = mulberry(77);
+  for (let i = 0; i < 150; i++) {
+    const x = -60 + i * 11.4, t0 = (x + 80) / (VW + 160);
+    const base = 258 + (ridgeN(x * .0055) - .5) * 70 * (.35 + t0 * .9);
+    const h = 6 + r() * 26 * (.5 + ridgeN(x * .004));
+    ctx.beginPath();
+    const wd = 2.4 + r() * 3.4;
+    ctx.moveTo(X(x - wd), Y(base + 2));
+    ctx.lineTo(X(x), Y(base - h));
+    ctx.lineTo(X(x + wd), Y(base + 2));
+    ctx.closePath(); ctx.fill();
+  }
+  haze(222, HZ + 26, "139,152,166", 0, .5);
+}
+
+function drawTerraceAndFort(t) {
+  const terr = x => 300 + (cliffN(x * .014) - .5) * 26 * (.35 + (x + 80) / 822 * .9);
+  const pts = jaggedTop(cliffN, -80, 742, 11, 300, 26, .014, 0);
+  fillPoly(pts, HZ + 40, "#243039");
+
+  // the gully and the road that switchbacks down it to the cove
+  ctx.strokeStyle = "rgba(120,134,148,.30)";
+  ctx.lineWidth = Math.max(1, S(2.2));
+  ctx.beginPath();
+  ctx.moveTo(X(376), Y(302));
+  ctx.bezierCurveTo(X(340), Y(330), X(392), Y(352), X(346), Y(384));
+  ctx.bezierCurveTo(X(310), Y(408), X(352), Y(424), X(318), Y(448));
+  ctx.stroke();
+
+  const baseY = 290, x0 = 424, x1 = 672;
+
+  // palisade
+  ctx.fillStyle = "#2f3b46";
+  ctx.fillRect(X(x0), Y(baseY - 19), S(x1 - x0), S(19));
+  ctx.strokeStyle = "rgba(11,16,22,.55)"; ctx.lineWidth = Math.max(1, S(.8));
+  for (let x = x0; x < x1; x += 4) {
+    ctx.beginPath(); ctx.moveTo(X(x), Y(baseY - 19)); ctx.lineTo(X(x), Y(baseY));
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(150,166,180,.35)"; ctx.lineWidth = Math.max(1, S(1));
+  ctx.beginPath(); ctx.moveTo(X(x0), Y(baseY - 19)); ctx.lineTo(X(x1), Y(baseY - 19));
+  ctx.stroke();
+
+  function blockhouse(bx, wide) {
+    const w = wide ? 15 : 13;
+    ctx.fillStyle = "#35424e";
+    ctx.fillRect(X(bx - w), Y(baseY - 36), S(w * 2), S(36));
+    ctx.strokeStyle = "rgba(11,16,22,.5)"; ctx.lineWidth = Math.max(1, S(.7));
+    for (let k = -w + 3; k < w; k += 5) {
+      ctx.beginPath();
+      ctx.moveTo(X(bx + k), Y(baseY - 36)); ctx.lineTo(X(bx + k), Y(baseY));
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(X(bx - w - 6), Y(baseY - 36));
+    ctx.lineTo(X(bx), Y(baseY - 57));
+    ctx.lineTo(X(bx + w + 6), Y(baseY - 36));
+    ctx.closePath(); ctx.fillStyle = "#1f2a33"; ctx.fill();
+    ctx.fillStyle = "rgba(255,196,110,.5)";
+    ctx.fillRect(X(bx - 5), Y(baseY - 28), S(4), S(5));
+    ctx.fillRect(X(bx + 2), Y(baseY - 20), S(4), S(5));
+  }
+  blockhouse(x0 + 8, true); blockhouse(x1 - 8, false);
+
+  // buildings inside the walls: gabled roofs, gable ends, chimneys
+  function building(bx, bw, bh, chim) {
+    ctx.fillStyle = "#39454f";
+    ctx.fillRect(X(bx), Y(baseY - 19 - bh * .45), S(bw), S(bh * .45));
+    ctx.beginPath();
+    ctx.moveTo(X(bx - 3), Y(baseY - 19 - bh * .45));
+    ctx.lineTo(X(bx + bw / 2), Y(baseY - 19 - bh));
+    ctx.lineTo(X(bx + bw + 3), Y(baseY - 19 - bh * .45));
+    ctx.closePath(); ctx.fillStyle = "#47545f"; ctx.fill();
+    ctx.fillStyle = "rgba(255,196,110,.34)";
+    ctx.fillRect(X(bx + bw * .3), Y(baseY - 19 - bh * .3), S(3.5), S(4));
+    if (chim) {
+      ctx.fillStyle = "#2b3640";
+      ctx.fillRect(X(bx + bw * .72), Y(baseY - 22 - bh), S(4), S(9));
+      ctx.save();
+      ctx.globalAlpha = .2;
+      ctx.strokeStyle = "#b9c6d2"; ctx.lineWidth = Math.max(1, S(3));
+      ctx.beginPath();
+      ctx.moveTo(X(bx + bw * .72 + 2), Y(baseY - 24 - bh));
+      ctx.quadraticCurveTo(X(bx + bw * .72 + 22 + Math.sin(t * .6) * 5),
+                           Y(baseY - 40 - bh),
+                           X(bx + bw * .72 + 54), Y(baseY - 48 - bh));
+      ctx.stroke(); ctx.restore();
+    }
+  }
+  building(442, 30, 26, true);
+  building(486, 26, 21, false);
+  building(524, 34, 28, true);
+  building(572, 24, 19, false);
+
+  // chapel: gable, cupola, cross
+  ctx.fillStyle = "#39454f";
+  ctx.fillRect(X(604), Y(baseY - 30), S(34), S(11));
+  ctx.beginPath();
+  ctx.moveTo(X(601), Y(baseY - 30)); ctx.lineTo(X(621), Y(baseY - 44));
+  ctx.lineTo(X(641), Y(baseY - 30)); ctx.closePath();
+  ctx.fillStyle = "#47545f"; ctx.fill();
+  ctx.fillStyle = "#39454f";
+  ctx.fillRect(X(617), Y(baseY - 56), S(9), S(14));
+  ctx.beginPath();
+  ctx.moveTo(X(614), Y(baseY - 56)); ctx.lineTo(X(621.5), Y(baseY - 64));
+  ctx.lineTo(X(629), Y(baseY - 56)); ctx.closePath(); ctx.fill();
+  // Russian Orthodox cross: short top bar, main bar, slanted footbar.
+  // The chapel at Fort Ross is Orthodox, so a Latin cross would be wrong.
+  ctx.strokeStyle = "#8e9fac"; ctx.lineWidth = Math.max(1, S(.9));
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(X(621.5), Y(baseY - 64));   ctx.lineTo(X(621.5), Y(baseY - 76));
+  ctx.moveTo(X(619),   Y(baseY - 73.5)); ctx.lineTo(X(624),   Y(baseY - 73.5));
+  ctx.moveTo(X(616.5), Y(baseY - 70));   ctx.lineTo(X(626.5), Y(baseY - 70));
+  ctx.moveTo(X(618),   Y(baseY - 65.4)); ctx.lineTo(X(625),   Y(baseY - 67.4));
+  ctx.stroke();
+  ctx.lineCap = "butt";
+
+  // windmill outside the walls
+  ctx.strokeStyle = "#3b4854"; ctx.lineWidth = Math.max(1, S(1.8));
+  ctx.beginPath(); ctx.moveTo(X(706), Y(terr(706))); ctx.lineTo(X(710), Y(baseY - 30));
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(X(710), Y(baseY - 30)); ctx.rotate(t * .5);
+  ctx.lineWidth = Math.max(1, S(1.3));
+  for (let k = 0; k < 4; k++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(S(13), S(3.5)); ctx.stroke();
+  }
+  ctx.restore();
+
+  // outbuildings and stock pens beyond the stockade
+  building(692, 22, 15, false);
+  building(724, 18, 12, false);
+  fence(236, 424, terr, 14, 9, "rgba(112,128,142,.55)", .9);
+  fence(676, 742, terr, 6, 8, "rgba(112,128,142,.5)", .9);
+
+  haze(250, 352, "139,152,166", .08, .42);
+}
+
+function drawSea(t) {
+  const g = ctx.createLinearGradient(0, Y(HZ), 0, Y(790));
+  g.addColorStop(0, "#7c8a99"); g.addColorStop(.16, "#4c5b69");
+  g.addColorStop(.56, "#2b3844"); g.addColorStop(1, "#141c25");
+  ctx.fillStyle = g; ctx.fillRect(0, Y(HZ), W, Y(800) - Y(HZ));
+
+  for (let i = 0; i < 34; i++) {
+    const d = i / 33;
+    const yy = HZ + 5 + Math.pow(d, 1.8) * 460;
+    const amp = .6 + d * 16, sp = .2 + d * 1.3;
+    ctx.beginPath();
+    for (let x = -40; x <= VW + 40; x += 13) {
+      const y = yy + Math.sin(x * .0066 + t * sp + i * .7) * amp
+                   + Math.sin(x * .019 - t * sp * 1.6 + i * 2.3) * amp * .3;
+      if (x === -40) ctx.moveTo(X(x), Y(y)); else ctx.lineTo(X(x), Y(y));
+    }
+    ctx.strokeStyle = "rgba(190,206,220," + (.03 + d * .14) + ")";
+    ctx.lineWidth = Math.max(1, S(.7 + d * 2));
+    ctx.stroke();
+  }
+
+  if (!reduced) {
+    ctx.strokeStyle = "rgba(200,216,228,.2)";
+    ctx.lineWidth = Math.max(1, S(.9));
+    for (const d of dimples) {
+      const ph = (t * d.sp + d.ph) % 1.6;
+      if (ph > 1) continue;
+      const rr = 1 + ph * 9, dd = (d.y - HZ) / 460;
+      ctx.globalAlpha = (1 - ph) * (.16 + dd * .5);
+      ctx.beginPath();
+      ctx.ellipse(X(d.x), Y(d.y), S(rr), S(rr * .3), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = "rgba(24,40,36,.45)";
+  for (const k of [[430,528,120],[1270,512,84],[706,620,150]]) {
+    ctx.beginPath();
+    ctx.ellipse(X(k[0]), Y(k[1]), S(k[2]), S(11), 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawBeach(t) {
+  ctx.beginPath();
+  ctx.moveTo(X(-40), Y(560));
+  ctx.bezierCurveTo(X(120), Y(550), X(272), Y(584), X(362), Y(662));
+  ctx.bezierCurveTo(X(256), Y(706), X(108), Y(724), X(-40), Y(732));
+  ctx.closePath(); ctx.fillStyle = "#3b4149"; ctx.fill();
+
+  ctx.fillStyle = "#23282e";
+  for (const l of [[66,652,54,.12],[164,680,44,-.2],[246,636,38,.3],[-10,612,46,.06]]) {
+    ctx.save(); ctx.translate(X(l[0]), Y(l[1])); ctx.rotate(l[3]);
+    ctx.fillRect(S(-l[2]/2), S(-3.5), S(l[2]), S(7)); ctx.restore();
+  }
+  const w = .5 + .5 * Math.sin(t * .5);
+  ctx.save(); ctx.globalAlpha = .4 + w * .26;
+  ctx.beginPath();
+  ctx.moveTo(X(-40), Y(564 + w * 5));
+  ctx.bezierCurveTo(X(120), Y(554 + w * 6), X(268), Y(590 + w * 6), X(356), Y(666 + w * 5));
+  ctx.lineWidth = Math.max(1, S(3.4)); ctx.strokeStyle = C.foam; ctx.stroke();
+  ctx.restore();
+}
+
+// The headland's surface. Anything built on the point must be placed
+// with this, or it floats.
+function headY(x) {
+  const tt = Math.max(0, (x - 1012) / 620);
+  return 580 - Math.pow(tt, .7) * 286 + (headN(x * .019) - .5) * 38;
+}
+
+function drawHeadland(t) {
+  const top = [];
+  for (let x = 1012; x <= VW + 80; x += 9) {
+    top.push([x, headY(x)]);
+  }
+  ctx.beginPath();
+  ctx.moveTo(X(top[0][0]), Y(top[0][1]));
+  for (const p of top) ctx.lineTo(X(p[0]), Y(p[1]));
+  ctx.lineTo(X(VW + 80), Y(VH + 60));
+  ctx.lineTo(X(1200), Y(VH + 60));
+  ctx.quadraticCurveTo(X(1096), Y(716), X(1012), Y(top[0][1] + 6));
+  ctx.closePath(); ctx.fillStyle = "#151d25"; ctx.fill();
+
+  ctx.save(); ctx.globalAlpha = .4;
+  ctx.strokeStyle = "#3e4c58"; ctx.lineWidth = Math.max(1, S(1.7));
+  ctx.beginPath();
+  ctx.moveTo(X(top[0][0]), Y(top[0][1]));
+  for (const p of top) ctx.lineTo(X(p[0]), Y(p[1]));
+  ctx.stroke();
+  ctx.globalAlpha = .16; ctx.lineWidth = Math.max(1, S(1.1));
+  for (let k = 1; k <= 5; k++) {
+    ctx.beginPath();
+    for (let j = 0; j < top.length; j++) {
+      const yy = top[j][1] + k * 26 + (headN(top[j][0] * .03 + k) - .5) * 9;
+      if (j === 0) ctx.moveTo(X(top[j][0]), Y(yy)); else ctx.lineTo(X(top[j][0]), Y(yy));
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = .16 + .1 * Math.sin(t * 1.3);
+  ctx.beginPath(); ctx.moveTo(X(1016), Y(632));
+  ctx.quadraticCurveTo(X(1100), Y(706), X(1200), Y(792));
+  ctx.lineWidth = Math.max(1, S(5)); ctx.strokeStyle = C.foam; ctx.stroke();
+  ctx.restore();
+
+  for (const s of [[1236,292,26,46],[1330,280,17,33],[1418,296,30,40]]) {
+    ctx.beginPath();
+    ctx.moveTo(X(s[0] - s[2]/2), Y(s[1] + s[3]));
+    ctx.lineTo(X(s[0] - s[2]*.28), Y(s[1]));
+    ctx.lineTo(X(s[0] + s[2]*.2), Y(s[1] + s[3]*.2));
+    ctx.lineTo(X(s[0] + s[2]/2), Y(s[1] + s[3]));
+    ctx.closePath(); ctx.fillStyle = "rgba(32,43,53,.85)"; ctx.fill();
+  }
+}
+
+const CH = { bluffX: 1408, towerX: 1142, towerY: 486,
+             baseX: 1148, baseY: 636, apronX: 962, apronY: 498 };
+CH.bluffY = 0;   // filled in once headY exists, see drawChute
+
+function drawChute(t) {
+  CH.bluffY = headY(CH.bluffX) - 4;        // sit on the rock, not above it
+  const sway = Math.sin(t * .5) * 1.5;
+  const TX = CH.towerX + sway, TY = CH.towerY;
+  const AX = CH.apronX + sway * .4, AY = CH.apronY;
+
+  // ---------- the chute head on the bluff: platform, shed, waiting lumber
+  ctx.fillStyle = "#2a3540";
+  ctx.fillRect(X(CH.bluffX - 8), Y(CH.bluffY - 6), S(86), S(9));
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(1, S(1.6));
+  for (let i = 0; i < 5; i++) {
+    const lx = CH.bluffX + 2 + i * 17;
+    ctx.beginPath();
+    ctx.moveTo(X(lx), Y(CH.bluffY + 3));
+    ctx.lineTo(X(lx + 2), Y(headY(lx) + 8));    // down to the rock
+    ctx.stroke();
+  }
+  // shed at the head
+  ctx.fillStyle = "#39454f";
+  ctx.fillRect(X(CH.bluffX + 36), Y(CH.bluffY - 30), S(36), S(24));
+  ctx.beginPath();
+  ctx.moveTo(X(CH.bluffX + 32), Y(CH.bluffY - 30));
+  ctx.lineTo(X(CH.bluffX + 54), Y(CH.bluffY - 45));
+  ctx.lineTo(X(CH.bluffX + 76), Y(CH.bluffY - 30));
+  ctx.closePath(); ctx.fillStyle = "#47545f"; ctx.fill();
+  ctx.fillStyle = "rgba(255,196,110,.4)";
+  ctx.fillRect(X(CH.bluffX + 46), Y(CH.bluffY - 22), S(7), S(8));
+  // lumber stacked at the head, waiting to go down
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = i % 2 ? C.timber : C.timberLit;
+    ctx.fillRect(X(CH.bluffX - 4 + i * 2), Y(CH.bluffY - 14 - i * 6), S(34), S(6));
+    ctx.fillStyle = "rgba(11,16,22,.4)";
+    ctx.fillRect(X(CH.bluffX - 4 + i * 2), Y(CH.bluffY - 14 - i * 6), S(34), S(2));
+  }
+  // the brake at the chute head
+  ctx.strokeStyle = "#5a4a30"; ctx.lineWidth = Math.max(1, S(2));
+  ctx.beginPath();
+  ctx.moveTo(X(CH.bluffX + 16), Y(CH.bluffY - 6));
+  ctx.lineTo(X(CH.bluffX + 22), Y(CH.bluffY - 26));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(X(CH.bluffX + 22), Y(CH.bluffY - 29), S(5), 0, Math.PI * 2);
+  ctx.stroke();
+
+  // ---------- A-frame: two heavy timbers, cross-braced, in the water
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(1, S(4.2));
+  ctx.beginPath();
+  ctx.moveTo(X(CH.baseX - 16), Y(CH.baseY)); ctx.lineTo(X(TX - 2), Y(TY));
+  ctx.moveTo(X(CH.baseX + 16), Y(CH.baseY)); ctx.lineTo(X(TX + 2), Y(TY));
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, S(1.3));
+  for (let i = .1; i < 1; i += .135) {
+    const yy = CH.baseY + (TY - CH.baseY) * i, half = 16 * (1 - i) + 2;
+    ctx.beginPath();
+    ctx.moveTo(X(CH.baseX - half), Y(yy)); ctx.lineTo(X(CH.baseX + half), Y(yy));
+    ctx.stroke();
+    const hn = 16 * (1 - (i + .135)) + 2;
+    ctx.beginPath();
+    ctx.moveTo(X(CH.baseX - half), Y(yy));
+    ctx.lineTo(X(CH.baseX + hn), Y(yy - (CH.baseY - TY) * .135));
+    ctx.moveTo(X(CH.baseX + half), Y(yy));
+    ctx.lineTo(X(CH.baseX - hn), Y(yy - (CH.baseY - TY) * .135));
+    ctx.stroke();
+  }
+  // legs seated in square notches cut into the boulders
+  for (const bx of [CH.baseX - 16, CH.baseX + 16]) {
+    ctx.fillStyle = "#0e141a";
+    ctx.fillRect(X(bx - 10), Y(CH.baseY - 3), S(20), S(12));
+    ctx.strokeStyle = "rgba(128,146,162,.55)"; ctx.lineWidth = Math.max(1, S(1));
+    ctx.strokeRect(X(bx - 6), Y(CH.baseY - 4), S(12), S(7));
+  }
+
+  // ---------- the trough: floor, two side rails, battens, ironwork
+  function run(x0, y0, x1, y1, wdt) {
+    const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+    const px = -(dy / len), py = dx / len;
+    // floor
+    ctx.beginPath();
+    ctx.moveTo(X(x0 + px * wdt), Y(y0 + py * wdt));
+    ctx.lineTo(X(x1 + px * wdt), Y(y1 + py * wdt));
+    ctx.lineTo(X(x1 - px * wdt), Y(y1 - py * wdt));
+    ctx.lineTo(X(x0 - px * wdt), Y(y0 - py * wdt));
+    ctx.closePath();
+    ctx.fillStyle = "#3a2f22"; ctx.fill();
+    // individual boards along the floor
+    ctx.strokeStyle = "rgba(11,16,22,.5)"; ctx.lineWidth = Math.max(1, S(.8));
+    for (let i = 0; i <= 1; i += .032) {
+      const bx = x0 + dx * i, by = y0 + dy * i;
+      ctx.beginPath();
+      ctx.moveTo(X(bx + px * wdt), Y(by + py * wdt));
+      ctx.lineTo(X(bx - px * wdt), Y(by - py * wdt));
+      ctx.stroke();
+    }
+    // the two side rails, lit along their top edges
+    ctx.lineWidth = Math.max(1, S(2.2));
+    for (const sgn of [1, -1]) {
+      ctx.strokeStyle = sgn > 0 ? "#8a7550" : "#5c4e36";
+      ctx.beginPath();
+      ctx.moveTo(X(x0 + px * wdt * sgn), Y(y0 + py * wdt * sgn));
+      ctx.lineTo(X(x1 + px * wdt * sgn), Y(y1 + py * wdt * sgn));
+      ctx.stroke();
+    }
+    // iron straps and bolts at the joints
+    ctx.fillStyle = "rgba(168,182,194,.5)";
+    for (let i = .08; i < 1; i += .16) {
+      const bx = x0 + dx * i, by = y0 + dy * i;
+      for (const sgn of [1, -1])
+        ctx.fillRect(X(bx + px * wdt * sgn) - S(1.4), Y(by + py * wdt * sgn) - S(1.4),
+                     S(2.8), S(2.8));
+    }
+  }
+  run(CH.bluffX, CH.bluffY, TX, TY, 10);
+  // trestle legs under the landward run, with diagonal braces
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(1, S(2.2));
+  for (let i = .16; i < 1; i += .16) {
+    const bx = CH.bluffX + (TX - CH.bluffX) * i;
+    const by = CH.bluffY + (TY - CH.bluffY) * i;
+    const foot = Math.max(by + 30, headY(bx) + 6);
+    ctx.beginPath();
+    ctx.moveTo(X(bx), Y(by + 6)); ctx.lineTo(X(bx + 9), Y(foot));
+    ctx.stroke();
+    ctx.lineWidth = Math.max(1, S(1));
+    ctx.beginPath();
+    ctx.moveTo(X(bx + 9), Y(foot - 16));
+    ctx.lineTo(X(bx + 30), Y(by + 10));
+    ctx.stroke();
+    ctx.lineWidth = Math.max(1, S(2.2));
+  }
+  run(TX, TY, AX, AY, 9);
+
+  // ---------- upper boom carrying the apron, with hangers
+  ctx.strokeStyle = "rgba(36,28,20,.95)"; ctx.lineWidth = Math.max(1, S(1.6));
+  ctx.beginPath();
+  ctx.moveTo(X(TX), Y(TY - 40)); ctx.lineTo(X(AX), Y(AY - 8));
+  ctx.moveTo(X(TX), Y(TY)); ctx.lineTo(X(TX), Y(TY - 40));
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, S(1));
+  ctx.strokeStyle = "rgba(160,176,190,.5)";
+  for (let i = .2; i < 1; i += .2) {
+    const hx = TX + (AX - TX) * i, hy = TY + (AY - TY) * i;
+    ctx.beginPath();
+    ctx.moveTo(X(hx), Y(hy - 8 - (1 - i) * 26)); ctx.lineTo(X(hx), Y(hy - 8));
+    ctx.stroke();
+  }
+
+  // ---------- the clapper: hinged plank at the apron end, and its line
+  const clap = .18 + .12 * Math.sin(t * 1.1);
+  ctx.save();
+  ctx.translate(X(AX - 6), Y(AY + 2));
+  ctx.rotate(clap);
+  ctx.fillStyle = "#6b5940";
+  ctx.fillRect(0, S(-2.5), S(-24), S(5));
+  ctx.restore();
+  ctx.strokeStyle = "rgba(170,186,200,.45)"; ctx.lineWidth = Math.max(1, S(1));
+  ctx.beginPath();
+  ctx.moveTo(X(AX - 26), Y(AY + 6));
+  ctx.lineTo(X(AX - 34), Y(AY + 52));
+  ctx.stroke();
+
+  // ---------- guy wires with turnbuckles, to rings leaded into the cliff
+  for (const gx of [1282, 1386, 1478]) {
+    const gy = headY(gx) + 6;
+    ctx.strokeStyle = "rgba(160,176,190,.45)"; ctx.lineWidth = Math.max(1, S(1.1));
+    ctx.beginPath();
+    ctx.moveTo(X(TX), Y(TY - 40));
+    ctx.quadraticCurveTo(X((TX + gx) / 2), Y((TY - 40 + gy) / 2 + 9), X(gx), Y(gy));
+    ctx.stroke();
+    ctx.fillStyle = "rgba(180,194,206,.55)";
+    ctx.fillRect(X(gx - (gx - TX) * .28) - S(2), Y(gy + (TY - 40 - gy) * .28) - S(2),
+                 S(4.5), S(4.5));
+  }
+  // iron rings in the shore rocks with cables down to the frame
+  ctx.strokeStyle = "rgba(160,176,190,.45)"; ctx.lineWidth = Math.max(1, S(1));
+  for (const r of [[1214, 690], [1268, 664], [1176, 712]]) {
+    ctx.beginPath(); ctx.arc(X(r[0]), Y(r[1]), S(4.5), 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(X(r[0]), Y(r[1] - 4)); ctx.lineTo(X(CH.baseX + 9), Y(CH.baseY - 30));
+    ctx.stroke();
+  }
+
+  // ---------- the clapperman, on the platform at the apron's end
+  const mx = AX + 16, my = AY - 4;
+  ctx.fillStyle = "#0a0f14";
+  ctx.fillRect(X(mx - 3), Y(my - 17), S(6), S(13));
+  ctx.beginPath(); ctx.arc(X(mx), Y(my - 20), S(2.8), 0, Math.PI * 2); ctx.fill();
+  ctx.fillRect(X(mx - 2.4), Y(my - 5), S(2), S(6));
+  ctx.fillRect(X(mx + .6), Y(my - 5), S(2), S(6));
+  ctx.strokeStyle = "#0a0f14"; ctx.lineWidth = Math.max(1, S(1.4));
+  ctx.beginPath();
+  ctx.moveTo(X(mx - 2), Y(my - 14)); ctx.lineTo(X(AX - 4), Y(AY + 2));
+  ctx.stroke();
+
+  // lamp on the platform
+  const lg = ctx.createRadialGradient(X(TX), Y(TY - 34), 0, X(TX), Y(TY - 34), S(60));
+  lg.addColorStop(0, "rgba(255,196,110,.48)");
+  lg.addColorStop(1, "rgba(255,196,110,0)");
+  ctx.fillStyle = lg;
+  ctx.beginPath(); ctx.arc(X(TX), Y(TY - 34), S(60), 0, Math.PI * 2); ctx.fill();
+
+  // ---------- lumber running down and out
+  for (const b of bundles) {
+    let bx, by, ang;
+    if (b.p < .66) {
+      const k = b.p / .66;
+      bx = CH.bluffX + (TX - CH.bluffX) * k;
+      by = CH.bluffY + (TY - CH.bluffY) * k;
+      ang = Math.atan2(TY - CH.bluffY, TX - CH.bluffX);
+    } else {
+      const k = (b.p - .66) / .34;
+      bx = TX + (AX - TX) * k; by = TY + (AY - TY) * k;
+      ang = Math.atan2(AY - TY, AX - TX);
+    }
+    ctx.save(); ctx.translate(X(bx), Y(by)); ctx.rotate(ang);
+    ctx.fillStyle = b.p > .9 ? C.timberLit : C.timber;
+    ctx.fillRect(-S(15), -S(4.5), S(30), S(9));
+    ctx.fillStyle = "rgba(11,16,22,.4)";
+    ctx.fillRect(-S(15), -S(4.5), S(30), S(2.2));
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    ctx.fillRect(-S(15), S(2.6), S(30), S(1.4));
+    ctx.restore();
+  }
+}
+
+
+// The landing works beside the chute: a stone wharf first built by William
+// Benitz and expanded by George W. Call in the 1870s with a warehouse and
+// a derrick, stacked lumber ashore, and the light rail that ran from the
+// cliffs down to the wharf. (NOAA, Doghole Port: Fort Ross Cove.)
+function drawLanding(t) {
+  // stone wharf built out onto the rock shelf
+  ctx.fillStyle = "#2c353d";
+  ctx.beginPath();
+  ctx.moveTo(X(1132), Y(672));
+  ctx.lineTo(X(1268), Y(648));
+  ctx.lineTo(X(1274), Y(670));
+  ctx.lineTo(X(1136), Y(696));
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(122,140,156,.35)"; ctx.lineWidth = Math.max(1, S(1));
+  for (let i = 0; i <= 8; i++) {
+    const f = i / 8;
+    ctx.beginPath();
+    ctx.moveTo(X(1132 + 136 * f), Y(672 - 24 * f));
+    ctx.lineTo(X(1136 + 138 * f), Y(696 - 26 * f));
+    ctx.stroke();
+  }
+
+  // warehouse on the wharf
+  ctx.fillStyle = "#39454f";
+  ctx.fillRect(X(1160), Y(632), S(50), S(24));
+  ctx.beginPath();
+  ctx.moveTo(X(1155), Y(632)); ctx.lineTo(X(1185), Y(615));
+  ctx.lineTo(X(1215), Y(632)); ctx.closePath();
+  ctx.fillStyle = "#47545f"; ctx.fill();
+  ctx.fillStyle = "rgba(255,196,110,.42)";
+  ctx.fillRect(X(1172), Y(641), S(6), S(8));
+  ctx.fillRect(X(1192), Y(641), S(6), S(8));
+
+  // derrick: mast, boom, tackle
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(1, S(2.6));
+  ctx.beginPath();
+  ctx.moveTo(X(1234), Y(660)); ctx.lineTo(X(1232), Y(592)); ctx.stroke();
+  ctx.lineWidth = Math.max(1, S(2));
+  ctx.beginPath();
+  ctx.moveTo(X(1232), Y(600)); ctx.lineTo(X(1180), Y(622)); ctx.stroke();
+  ctx.strokeStyle = "rgba(150,166,180,.4)"; ctx.lineWidth = Math.max(1, S(1));
+  ctx.beginPath();
+  ctx.moveTo(X(1180), Y(622));
+  ctx.lineTo(X(1180), Y(638 + Math.sin(t * .7) * 4));
+  ctx.moveTo(X(1232), Y(592)); ctx.lineTo(X(1266), Y(636));
+  ctx.stroke();
+
+  // stacked lumber ashore, warm against the rock
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = i % 2 ? C.timber : C.timberLit;
+    ctx.globalAlpha = .9;
+    ctx.fillRect(X(1264 + i * 3), Y(658 - i * 7), S(44), S(7));
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(11,16,22,.4)";
+    ctx.fillRect(X(1264 + i * 3), Y(658 - i * 7), S(44), S(2));
+  }
+
+  // light rail from the bluff down to the wharf
+  ctx.strokeStyle = "rgba(132,148,162,.45)"; ctx.lineWidth = Math.max(1, S(1.1));
+  for (const off of [0, 5]) {
+    ctx.beginPath();
+    ctx.moveTo(X(1276 + off), Y(612 + off * .4));
+    ctx.bezierCurveTo(X(1340 + off), Y(566), X(1374 + off), Y(508),
+                      X(1402 + off), Y(452));
+    ctx.stroke();
+  }
+  ctx.lineWidth = Math.max(1, S(.9));
+  for (let i = 0; i <= 12; i++) {
+    const f = i / 12;
+    const rx = 1276 + (1402 - 1276) * f + Math.pow(f, 1.4) * 8;
+    const ry = 612 - (612 - 452) * Math.pow(f, .92);
+    ctx.beginPath();
+    ctx.moveTo(X(rx - 3), Y(ry + 2)); ctx.lineTo(X(rx + 6), Y(ry - 1));
+    ctx.stroke();
+  }
+}
+
+function drawRocksAndSurf(t) {
+  for (const rk of ROCKS) {
+    const n = fbm(rk.seed);
+    ctx.beginPath();
+    for (let a = 0; a <= Math.PI*2 + .01; a += .26) {
+      const rr = rk.r * (.58 + n(a*1.7) * .82);
+      const px = rk.x + Math.cos(a)*rr, py = rk.y + Math.sin(a)*rr*.5;
+      if (a === 0) ctx.moveTo(X(px), Y(py)); else ctx.lineTo(X(px), Y(py));
+    }
+    ctx.closePath(); ctx.fillStyle = "#121920"; ctx.fill();
+    ctx.strokeStyle = "rgba(78,94,108,.45)"; ctx.lineWidth = Math.max(1, S(1));
+    ctx.stroke();
+
+    const burst = Math.max(0, Math.sin(t*1.1 + rk.ph));
+    if (burst > .04) {
+      ctx.save(); ctx.globalAlpha = burst * .36; ctx.fillStyle = C.foam;
+      ctx.beginPath();
+      const sw = rk.r*(1.15 + burst*.6), sh = rk.r*(.16 + burst*.3);
+      ctx.moveTo(X(rk.x - sw), Y(rk.y + rk.r*.28));
+      for (let k = -1; k <= 1; k += .1) {
+        const jx = rk.x + k*sw;
+        const jy = rk.y + rk.r*.28 - sh*(1 - k*k)*(.6 + n(k*3 + t)*.9);
+        ctx.lineTo(X(jx), Y(jy));
+      }
+      ctx.lineTo(X(rk.x + sw), Y(rk.y + rk.r*.34));
+      ctx.closePath(); ctx.fill(); ctx.restore();
+    }
+  }
+}
+
+function drawFog(t) {
+  const banks = [
+    { y: 330, h: 120, sp: 8,  a: .2,  c: "128,146,164" },
+    { y: 440, h: 150, sp: 16, a: .11, c: "168,184,200" },
+  ];
+  for (let i = 0; i < banks.length; i++) {
+    const b = banks[i], n = fbm(200 + i*13);
+    const g = ctx.createLinearGradient(0, Y(b.y - b.h*.6), 0, Y(b.y + b.h));
+    g.addColorStop(0, "rgba(" + b.c + ",0)");
+    g.addColorStop(.45, "rgba(" + b.c + "," + b.a + ")");
+    g.addColorStop(1, "rgba(" + b.c + ",0)");
+    ctx.fillStyle = g; ctx.beginPath();
+    ctx.moveTo(X(-60), Y(b.y + b.h));
+    for (let x = -60; x <= VW + 60; x += 26)
+      ctx.lineTo(X(x), Y(b.y + (n((x + t*b.sp)*.0032) - .5) * b.h * .75));
+    ctx.lineTo(X(VW + 60), Y(b.y + b.h));
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+function foreY(x) {
+  const tt = Math.max(x, 0) / VW;
+  return 640 + Math.pow(tt, 1.25) * 300 + (foreN(x * .0085) - .5) * 58;
+}
+
+function drawForeground(t) {
+  const pts = [];
+  for (let x = -60; x <= VW + 60; x += 10) pts.push([x, foreY(x)]);
+  fillPoly(pts, VH + 60, "#11171f");
+
+  ctx.save(); ctx.globalAlpha = .5;
+  ctx.beginPath();
+  ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
+  for (const p of pts) ctx.lineTo(X(p[0]), Y(p[1]));
+  ctx.strokeStyle = "#5a6b79"; ctx.lineWidth = Math.max(1, S(2.4)); ctx.stroke();
+  ctx.globalAlpha = .30; ctx.lineWidth = Math.max(1, S(1.1));
+  for (let k = 1; k <= 3; k++) {
+    ctx.beginPath();
+    for (let j = 0; j < pts.length; j++) {
+      const yy = pts[j][1] + k*22 + (foreN(pts[j][0]*.02 + k) - .5)*10;
+      if (j === 0) ctx.moveTo(X(pts[j][0]), Y(yy)); else ctx.lineTo(X(pts[j][0]), Y(yy));
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.moveTo(X(1150), Y(VH + 40));
+  ctx.quadraticCurveTo(X(1226), Y(776), X(1352), Y(794));
+  ctx.quadraticCurveTo(X(1468), Y(812), X(VW + 60), Y(844));
+  ctx.lineTo(X(VW + 60), Y(VH + 40));
+  ctx.closePath(); ctx.fillStyle = "#0b1017"; ctx.fill();
+
+  if (!reduced) {
+    ctx.strokeStyle = "rgba(96,112,126,.9)"; ctx.lineWidth = Math.max(1, S(1.4));
+    const g = fbm(303);
+    for (let i = 0; i < 78; i++) {
+      const gx = -20 + i*21 + g(i)*12;
+      const gy = foreY(gx);
+      const sway = Math.sin(t*2.2 + i)*6 + 8;
+      ctx.beginPath(); ctx.moveTo(X(gx), Y(gy + 5));
+      ctx.quadraticCurveTo(X(gx + sway*.5), Y(gy - 11), X(gx + sway), Y(gy - 24));
+      ctx.stroke();
+    }
+  }
+
+
+  const fx = 470, fy = foreY(fx);
+  ctx.save();
+  ctx.shadowColor = "rgba(150,180,205,.85)"; ctx.shadowBlur = S(9);
+  ctx.fillStyle = "#05080b";
+  ctx.fillRect(X(fx - 5), Y(fy - 26), S(10), S(20));
+  ctx.beginPath();
+  ctx.ellipse(X(fx), Y(fy - 31), S(4.2), S(5), 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(X(fx - 9), Y(fy - 30)); ctx.lineTo(X(fx + 9), Y(fy - 30));
+  ctx.lineTo(X(fx + 6), Y(fy - 34)); ctx.lineTo(X(fx - 6), Y(fy - 34));
+  ctx.closePath(); ctx.fill();
+  ctx.fillRect(X(fx - 4), Y(fy - 7), S(3), S(9));
+  ctx.fillRect(X(fx + 1), Y(fy - 7), S(3), S(9));
+  ctx.restore();
+}
+
+// Drawn after the scrim: a post-and-rail fence running the length of the
+// clifftop. Rails threaded through every post, following the ground.
+function drawCliffFence(t) {
+  fence(-30, 1120, foreY, 26, 34, "rgba(150,168,184,.95)", 2.2);
+}
+
+function drawScrim() {
+  const g = ctx.createRadialGradient(X(150), Y(790), S(40), X(150), Y(790), S(1200));
+  g.addColorStop(0, "rgba(11,16,22,.58)");
+  g.addColorStop(.45, "rgba(11,16,22,.26)");
+  g.addColorStop(1, "rgba(11,16,22,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+function drawRain(dt) {
+  const wind = .4;
+  ctx.save(); ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(186,204,218,.14)"; ctx.lineWidth = Math.max(1, S(1));
+  ctx.beginPath();
+  for (const d of rainFar) {
+    d.y += d.sp*dt*60; d.x += d.sp*wind*dt*60;
+    if (d.y > VH + 30) { d.y = -30; d.x = Math.random()*(VW+400)-200; }
+    ctx.moveTo(X(d.x), Y(d.y)); ctx.lineTo(X(d.x - d.len*wind), Y(d.y - d.len));
+  }
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(214,228,240,.3)"; ctx.lineWidth = Math.max(1, S(1.6));
+  ctx.beginPath();
+  for (const d of rainNear) {
+    d.y += d.sp*dt*60; d.x += d.sp*wind*dt*60;
+    if (d.y > VH + 40) { d.y = -40; d.x = Math.random()*(VW+400)-200; }
+    ctx.moveTo(X(d.x), Y(d.y)); ctx.lineTo(X(d.x - d.len*wind), Y(d.y - d.len));
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+let flash = 0, nextFlash = 5 + Math.random()*9;
+let bolt = null, boltLife = 0;
+
+// LIGHTNING. Every strike is generated fresh and no two are alike: the kind of
+// strike, where it falls, how far it rakes over, how hard it forks, how thick
+// it is, and how many times it flickers are all rolled each time.
+const BOLT_KINDS = ["forked", "forked", "ragged", "distant", "crawler", "sheet"];
+
+function branch(x, y, yEnd, step, jitter, rake, depth, out) {
+  const pts = [[x, y]];
+  while (y < yEnd) {
+    y += step * (.6 + Math.random() * .9);
+    x += (Math.random() - .5) * jitter + rake * step;
+    pts.push([x, y]);
+    // a fork can throw its own fork, which is what makes them look unrepeated
+    if (depth < 2 && Math.random() < (depth ? .12 : .20) && y < yEnd - step) {
+      const dir = Math.random() < .5 ? -1 : 1;
+      branch(x, y, y + (yEnd - y) * (.3 + Math.random() * .55),
+             step * .8, jitter * .9, rake + dir * (.5 + Math.random()), depth + 1, out);
+    }
+  }
+  out.push({ pts, depth });
+  return out;
+}
+
+function makeBolt() {
+  const kind = BOLT_KINDS[(Math.random() * BOLT_KINDS.length) | 0];
+  const pulses = 1 + ((Math.random() * 3) | 0);        // real strokes flicker
+  const pulseLen = .07 + Math.random() * .1;
+  const b = { kind, pulses, pulseLen, life: pulses * pulseLen,
+              hue: Math.random() < .35 ? "#e6f0ff" : "#f4f9ff" };
+
+  if (kind === "sheet") {                               // no channel, just cloud
+    b.glow = [200 + Math.random() * 1200, 40 + Math.random() * 150,
+              220 + Math.random() * 320];
+    b.limbs = [];
+    return b;
+  }
+
+  const x = 90 + Math.random() * 1420;
+  const yTop = 6 + Math.random() * 80;
+  let yEnd = 200 + Math.random() * 110;
+  let step = 11 + Math.random() * 22;
+  let jitter = 16 + Math.random() * 46;
+  let rake = (Math.random() - .5) * 1.7;
+  b.w = 1.5 + Math.random() * 2.2;
+
+  if (kind === "ragged")  { jitter *= 1.8; step *= .6; b.w *= .9; }
+  if (kind === "distant") { b.w *= .45; yEnd = 120 + Math.random() * 90;
+                            jitter *= .6; b.dim = true; }
+  if (kind === "crawler") { yEnd = yTop + 30 + Math.random() * 50;
+                            rake = (Math.random() < .5 ? -1 : 1) * (2.4 + Math.random() * 2.2);
+                            jitter *= 1.3; }
+
+  b.limbs = branch(x, yTop, yEnd, step, jitter, rake, 0, []);
+  b.glow = [x, (yTop + yEnd) / 2, 150 + Math.random() * 220];
+  return b;
+}
+
+function drawBolt() {
+  if (!bolt || boltLife <= 0) return;
+  // flicker: the channel re-lights a few times, then dies
+  let a;
+  if (bolt.hold) a = 1;
+  else {
+    const age = bolt.life - boltLife;
+    const ph  = (age % bolt.pulseLen) / bolt.pulseLen;
+    a = Math.pow(1 - ph, 1.5) * (.55 + .45 * Math.random());
+  }
+  if (bolt.dim) a *= .6;
+
+  ctx.save();
+  if (bolt.glow) {                       // the cloud lights up around the channel
+    const [gx, gy, gr] = bolt.glow;
+    const g = ctx.createRadialGradient(X(gx), Y(gy), 0, X(gx), Y(gy), S(gr));
+    g.addColorStop(0, `rgba(170,205,240,${(bolt.kind === "sheet" ? .5 : .3) * a})`);
+    g.addColorStop(1, "rgba(170,205,240,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(X(gx - gr), Y(gy - gr), S(gr * 2), S(gr * 2));
+  }
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const stroke = (path, w, col, al) => {
+    ctx.globalAlpha = Math.max(0, Math.min(1, al));
+    ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, S(w));
+    ctx.beginPath(); ctx.moveTo(X(path[0][0]), Y(path[0][1]));
+    for (let i = 1; i < path.length; i++) ctx.lineTo(X(path[i][0]), Y(path[i][1]));
+    ctx.stroke();
+  };
+  for (const limb of bolt.limbs) {
+    const k = limb.depth === 0 ? 1 : limb.depth === 1 ? .55 : .34;
+    stroke(limb.pts, bolt.w * 5 * k, "#7fa8d0", a * .26);
+    stroke(limb.pts, bolt.w * 2 * k, "#bcd8f0", a * .5);
+    stroke(limb.pts, bolt.w * k,     bolt.hue,  a);
+  }
+  ctx.restore();
+}
+
+// the whole sky lifting for an instant, which is what you notice first
+function drawFlash() {
+  if (flash <= 0) return;
+  ctx.save(); ctx.globalAlpha = flash * .17;
+  ctx.fillStyle = "#cfe0ef"; ctx.fillRect(0, 0, W, H); ctx.restore();
+}
+
+// dev hook: window.__strike() fires one bolt, window.__strike(seconds) holds it
+// on screen and pauses the natural cycle so it can be screenshotted
+window.__strike = (life) => {
+  bolt = makeBolt(); flash = 1;
+  if (life && life > 5) { bolt.hold = true; boltLife = life; nextFlash = life; }
+  else boltLife = bolt.life;
+  return bolt.kind;
+};
+
+let last = performance.now(), t = 0;
+function frame(now) {
+  const dt = Math.min((now - last)/1000, .05); last = now; t += dt;
+  if (!reduced) {
+    nextFlash -= dt;
+    if (nextFlash <= 0) {
+      flash = 1; nextFlash = 5 + Math.random()*11;
+      bolt = makeBolt(); boltLife = bolt.life;
+      // and the thunder after it, near or far to match the stroke
+      thunder(bolt.kind === "forked" || bolt.kind === "ragged");
+    }
+    flash = Math.max(0, flash - dt*3.2);
+    boltLife = Math.max(0, boltLife - dt);
+    nextBundle -= dt;
+    if (nextBundle <= 0) { bundles.push({ p: 0 }); nextBundle = 3 + Math.random()*4; }
+    for (let i = bundles.length - 1; i >= 0; i--) {
+      bundles[i].p += dt*.4;
+      if (bundles[i].p > 1.02) bundles.splice(i, 1);
+    }
+  }
+  const steps = [
+    ["sky", () => drawSky(t)], ["bolt", () => drawBolt()],
+    ["gulls", () => drawGulls(t)],
+    ["ridge", () => drawFarRidge(t)], ["fort", () => drawTerraceAndFort(t)],
+    ["sea", () => drawSea(t)], ["beach", () => drawBeach(t)],
+    ["headland", () => drawHeadland(t)],
+    ["ship", () => drawSchooner(ctx, P, t)],
+    ["chute", () => drawChute(t)], ["landing", () => drawLanding(t)], ["rocks", () => drawRocksAndSurf(t)],
+    ["fog", () => drawFog(t)], ["fore", () => drawForeground(t)],
+    ["scrim", () => drawScrim()], ["fence", () => drawCliffFence(t)], ["rain", () => drawRain(dt)],
+    ["flash", () => drawFlash()],
+  ];
+  for (const [nm, fn] of steps) {
+    try { fn(); }
+    catch (err) {
+      window.__drawErr = window.__drawErr || {};
+      if (!window.__drawErr[nm]) window.__drawErr[nm] = String(err);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+resize(); requestAnimationFrame(frame);
+
+let ni = 0;
+const h1 = document.getElementById("gametitle");
+const eb = document.getElementById("eyebrow");
+const mark = document.getElementById("curtainmark");
+function paintName() {
+  const n = LANDINGS[ni];
+  document.getElementById("landingname").textContent = n.t;
+  document.getElementById("landingwhere").textContent = n.w;
+  // the one-line notes still live in LANDINGS; nothing on screen shows them now
+}
+paintName();
+// Thunder on the title screen too, since the storm is the whole picture.
+// Its own small audio context: the theme is an <audio> element and these
+// want to be buffers so they can be fired at a delay after the flash.
+let TA = null, thunNear = null, thunFar = null;
+async function thunderInit(){
+  if (TA) return;
+  try { TA = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return; }
+  if (TA.state === "suspended") TA.resume().catch(()=>{});
+  const get = async url => {
+    try { const r = await fetch(url); return await TA.decodeAudioData(await r.arrayBuffer()); }
+    catch(e){ return null; }
+  };
+  thunNear = await get("thunder-near.m4a");
+  thunFar  = await get("thunder-far.m4a");
+}
+function thunder(near){
+  const buf = near ? thunNear : thunFar;
+  if (!TA || !buf || audio.muted) return;
+  const delay = near ? .25 + Math.random()*.7 : 1.8 + Math.random()*3.6;
+  setTimeout(() => {
+    if (!TA || audio.muted) return;
+    const src = TA.createBufferSource(); src.buffer = buf;
+    const g = TA.createGain(); g.gain.value = near ? .7 : .42;
+    src.connect(g); g.connect(TA.destination); src.start();
+  }, delay*1000);
+}
+
+const audio = document.getElementById("theme");
+
+const curtain = document.getElementById("curtain");
+let started = false;
+// FIRST touch lifts the curtain and starts the music. It does NOT start the
+// game: the title screen is the attract screen and is meant to be sat in.
+function start() {
+  if (started) return; started = true;
+  curtain.classList.add("gone");
+  thunderInit();
+  audio.volume = 0;
+  audio.play().then(() => {
+    const f = setInterval(() => {
+      audio.volume = Math.min(.85, audio.volume + .03);
+      if (audio.volume >= .85) clearInterval(f);
+    }, 90);
+  }).catch(() => {});
+}
+// and the SECOND Enter, or the button, sails for the cove
+function launch() {
+  if (!started) { start(); return; }
+  document.body.style.transition = "opacity .6s ease";
+  document.body.style.opacity = "0";
+  setTimeout(() => { location.href = "play.html"; }, 620);
+}
+curtain.addEventListener("click", start);
+document.getElementById("begin").addEventListener("click", launch);
+// T cycles the display face so Aodhan can pick one by eye. All are installed
+// on macOS; Superclarendon is the default because a Clarendon is the
+// nineteenth-century shipping-notice face and matches the broadside look.
+// Gothic first. NOTE: macOS ships no true blackletter, so Trattatello is the
+// closest thing installed: a rough medieval pen hand with blackletter bones.
+// third value is an optical size correction: these faces do not share a
+// cap-height, and Trattatello in particular sets far smaller than a Clarendon
+const FACES = [
+  ["Trattatello",      'Trattatello, Luminari, "Academy Engraved LET", serif', 1.62],
+  ["Luminari",         'Luminari, Trattatello, serif',                          1.18],
+  ["Academy Engraved", '"Academy Engraved LET", Luminari, serif',               1.30],
+  ["Herculanum",       'Herculanum, Trattatello, serif',                        1.16],
+  ["Superclarendon",   'Superclarendon, Clarendon, Rockwell, Georgia, serif',   1.00],
+  ["Big Caslon",       '"Big Caslon", BigCaslon, Baskerville, Georgia, serif',  1.12],
+];
+let fi = 0;
+function paintFace() {
+  document.documentElement.style.setProperty("--display", FACES[fi][1]);
+  document.documentElement.style.setProperty("--dscale", FACES[fi][2]);
+  document.documentElement.style.setProperty("--mono", FACES[fi][1]);
+  document.getElementById("faceline").textContent = "Type: " + FACES[fi][0];
+}
+paintFace();
+
+addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if (k === "enter") launch();
+  if (k === "n") { ni = (ni + 1) % LANDINGS.length; paintName(); }
+  if (k === "t") { fi = (fi + 1) % FACES.length; paintFace(); }
+  if (k === "=" || k === "+") location.href = "gate.html?cargo=42";   // skip the cove
+  if (k === "m") audio.muted = !audio.muted;
+  if (k === "f") document.documentElement.requestFullscreen &&
+                 document.documentElement.requestFullscreen();
+});
+</script>

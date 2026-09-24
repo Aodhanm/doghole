@@ -1,0 +1,1612 @@
+<meta charset="utf-8">
+<title>Doghole &mdash; Fort Ross Cove</title>
+<style>
+  :root{
+    --bg:#0b1016; --amber:#f2a63c; --dim:#8b97a3; --green:#7fd6a2;
+    --display: Trattatello, Luminari, "Academy Engraved LET", serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:#dfe6ec;overflow:hidden;
+    font-family:var(--display);-webkit-font-smoothing:antialiased}
+  #stage{position:absolute;inset:0}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .plate{position:absolute;inset:0;pointer-events:none;
+    padding:clamp(12px,2vw,26px) clamp(14px,2.4vw,34px)}
+  .tl{position:absolute;left:clamp(14px,2.4vw,34px);top:clamp(12px,2vw,26px)}
+  .tr{position:absolute;right:clamp(14px,2.4vw,34px);top:clamp(12px,2vw,26px);text-align:right}
+  .bl{position:absolute;left:clamp(14px,2.4vw,34px);bottom:clamp(12px,2vw,26px)}
+  .br{position:absolute;right:clamp(14px,2.4vw,34px);bottom:clamp(12px,2vw,26px);text-align:right}
+  .k{font-size:clamp(10px,.82vw,13px);letter-spacing:.1em;color:var(--dim);line-height:1.85}
+  .k b{color:#e7eef4;font-weight:400}
+  .k .a{color:var(--amber)}
+  .k .g{color:var(--green)}
+  .k .r{color:#e2705a}
+  .phase{font-size:clamp(15px,1.5vw,22px);color:var(--amber);letter-spacing:.06em}
+  .order{font-size:clamp(12px,1.05vw,16px);color:#cfd8e0;max-width:34ch;line-height:1.5;
+    text-shadow:0 1px 3px rgba(11,16,22,.9)}
+  .big{font-size:clamp(26px,3.4vw,52px);line-height:1;color:#f2f6f9}
+  #card{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(7,10,15,.82);transition:opacity .5s ease;z-index:5}
+  #card.gone{opacity:0;pointer-events:none}
+  .cardin{max-width:min(720px,84vw);padding:0 10px}
+  .cardin h1{font-size:clamp(30px,4.6vw,66px);margin:0 0 .3em;font-weight:400;color:#f2f6f9}
+  .cardin p{font-size:clamp(12px,1.12vw,17px);line-height:1.62;color:#c7d1da;margin:.5em 0}
+  .cardin .src{font-size:clamp(10px,.86vw,13px);color:var(--dim);line-height:1.7;margin-top:1.1em}
+  .cardin .go{margin-top:1.3em;color:var(--amber);font-size:clamp(12px,1.1vw,16px)}
+  .bar{height:3px;background:rgba(140,155,170,.22);margin-top:6px;width:190px}
+  .bar i{display:block;height:100%;background:var(--amber)}
+  .hint{color:var(--dim);font-size:clamp(9px,.76vw,12px);letter-spacing:.08em}
+</style>
+
+<div id="stage">
+  <canvas id="sea"></canvas>
+  <div class="plate">
+    <div class="tl">
+      <div class="phase" id="phase">The run in</div>
+      <div class="order k" id="order"></div>
+    </div>
+    <div class="tr k" id="nav"></div>
+    <div class="bl k" id="sail"></div>
+    <div class="br k" id="cargo"></div>
+  </div>
+  <div id="card"><div class="cardin" id="cardin"></div></div>
+</div>
+<audio id="theme" src="theme.m4a" loop preload="auto"></audio>
+
+<script type="module">
+import { drawSchooner } from "./ship.js";
+import * as CV from "./cove.js";
+import { makeVessel, step, drawVessel, CAPACITY, degOf, norm } from "./vessel.js";
+
+const KN = CV.KN;
+const cv = document.getElementById("sea");
+const ctx = cv.getContext("2d", { alpha:false });
+let W=0, H=0, DPR=1;
+function resize(){
+  DPR = Math.min(devicePixelRatio||1, 2);
+  W = Math.max(320, innerWidth); H = Math.max(240, innerHeight);
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener("resize", resize); resize();
+
+// the title screen's palette, unchanged
+const C = {
+  hull:"#10161e", house:"#1a232e", spar:"#2a2118",
+  rig:"rgba(196,210,222,.45)", canvas:"#7d8590",
+  timber:"#c8781f", timberLit:"#f2a63c", lamp:"#ffc46e",
+  foam:"#cfdae2", buoy:"#c8781f",
+  land:"#243039", landLit:"#2f3b46", cliff:"#1b242c", sand:"#4a4436",
+};
+
+// ------------------------------------------------------------- camera
+const cam = { x: 500, y: 300, span: 820 };     // span = yards across the view
+const T = {
+  X: x => (x - cam.x) * T.k + W/2,
+  Y: y => (y - cam.y) * T.k + H/2,
+  S: v => v * T.k,
+  k: 1,
+};
+const SPAN = { brief: 700, approach: 470, moor: 300, load: 275, depart: 440, wrecking: 260, over: 330 };
+function camUpdate(v, dt){
+  cam.span += ((SPAN[phase] || 470) - cam.span) * Math.min(1, dt * 1.1);
+  const lead = 1.5;
+  const bias = (phase === "moor" || phase === "load") ? 1 : 0;
+  const tx = v.x + v.vx*lead - bias*74, ty = v.y + v.vy*lead - bias*46;
+  cam.x += (tx - cam.x) * Math.min(1, dt*3.4);
+  cam.y += (ty - cam.y) * Math.min(1, dt*3.4);
+  T.k = W / Math.max(60, cam.span);
+}
+
+// ------------------------------------------------------------ weather
+// Davidson: "Off Northwest Cape, the eddy inshore current generally sets
+// to the northward at from one quarter to one-half mile per hour ...
+// Sometimes this current is reversed in continued heavy northwesters."
+// So the set is real, documented, and different every game.
+function makeWeather(){
+  const reversed = Math.random() < .3;
+  const rate = .25 + Math.random()*.25;            // miles per hour
+  const southEaster = Math.random() < .28;         // the winter gale
+  return {
+    t: 0,
+    windFrom: southEaster ? 120 + Math.random()*40 : 300 + Math.random()*35,
+    windKn: southEaster ? 16 + Math.random()*10 : 9 + Math.random()*8,
+    setDeg: reversed ? 180 : 0,                    // north, or reversed
+    setKn: rate,                                   // knots (mph is close enough at sea)
+    swell: .10 + Math.random()*.10,
+    swellDir: 225,                                 // the south-west swell
+    swellRate: .62,
+    curX: 0, curY: 0,
+    southEaster, reversed,
+    tide: Math.random()*Math.PI*2,
+  };
+}
+function weatherStep(env, dt){
+  env.t += dt;
+  // the tide turns through the game, so the set swings and strengthens
+  env.tide += dt * .012;
+  const swing = Math.sin(env.tide) ;
+  const dir = (env.setDeg + swing*34) * Math.PI/180;
+  const mag = (env.setKn * (.55 + .75*Math.abs(Math.cos(env.tide*.7)))) * KN;
+  env.curX = Math.sin(dir) * mag;
+  env.curY = -Math.cos(dir) * mag;
+  env.swell = Math.min(.42, env.swell + dt*.0016);   // the sea gets up
+}
+
+// ------------------------------------------------------------- chart
+// Depth bands, like a chart, so you can read the water at a glance.
+const BANDS = [
+  [0,   "#3c4c55"],   // awash and drying: the pale water you must not enter
+  [12,  "#31424e"],   // two fathoms
+  [18,  "#293a47"],   // THREE FATHOMS, Davidson's own curve
+  [30,  "#223341"],   // five fathoms
+  [48,  "#1c2c39"],   // eight fathoms
+  [60,  "#172532"],   // ten fathoms
+  [999, "#131f2b"],
+];
+let bandCache = null;
+function drawWater(){
+  // painted once into an offscreen the size of the world view, then blitted
+  const step = 9;
+  if (!bandCache || bandCache.k !== T.k || bandCache.cx !== Math.round(cam.x/6)
+      || bandCache.cy !== Math.round(cam.y/6)){
+    const oc = bandCache && bandCache.oc || document.createElement("canvas");
+    oc.width = Math.ceil(W/step)+2; oc.height = Math.ceil(H/step)+2;
+    const o = oc.getContext("2d");
+    for (let j=0;j<oc.height;j++){
+      for (let i=0;i<oc.width;i++){
+        const wx = cam.x + ((i*step) - W/2)/T.k;
+        const wy = cam.y + ((j*step) - H/2)/T.k;
+        const ft = CV.depthAt(wx, wy);
+        let col = BANDS[BANDS.length-1][1];
+        for (const [lim,c] of BANDS) if (ft < lim){ col = c; break; }
+        o.fillStyle = col; o.fillRect(i,j,1,1);
+      }
+    }
+    bandCache = { oc, k:T.k, cx:Math.round(cam.x/6), cy:Math.round(cam.y/6) };
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(bandCache.oc, 0, 0, W+step, H+step);
+}
+
+// the south-west swell, walking into the cove. Davidson: the place is
+// "broad open to the southwest swell", and it is the swell, not the wind,
+// that decides whether you can lie at the chute at all.
+function drawSwell(t, env){
+  const a = (env.swellDir + 90) * Math.PI/180;       // crests run across it
+  const ux = Math.cos(a), uy = Math.sin(a);
+  const px = -uy, py = ux;                            // the way they travel
+  const gap = 44, len = Math.max(W, H) * 1.6 / T.k;
+  const phase = (t * 26) % gap;
+  ctx.save();
+  ctx.strokeStyle = "rgba(180,202,220,.07)";
+  ctx.lineWidth = Math.max(1, T.S(2.2));
+  const n = Math.ceil(Math.max(W,H)/T.k/gap) + 3;
+  for (let i = -n; i < n; i++){
+    // project the camera onto the swell's axis so the crests keep their
+    // own place in the world and stream past you as you sail
+    const base = Math.round((cam.x*px + cam.y*py) / gap) * gap;
+    const d = base + i*gap + phase;
+    const bx = px*d, by = py*d;
+    const wob = Math.sin(t*.7 + i)*4;
+    ctx.beginPath();
+    ctx.moveTo(T.X(bx - ux*len + px*wob), T.Y(by - uy*len + py*wob));
+    ctx.lineTo(T.X(bx + ux*len + px*wob), T.Y(by + uy*len + py*wob));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Texture that belongs to the WORLD, not to the screen. Without this the
+// water is a flat colour, the camera holds you in the middle of it, and you
+// cannot tell you are moving at all. These stream past, and now you can.
+function drawFlecks(t){
+  const cell = 24;
+  const halfW = W/2/T.k, halfH = H/2/T.k;
+  const i0 = Math.floor((cam.x-halfW)/cell), i1 = Math.ceil((cam.x+halfW)/cell);
+  const j0 = Math.floor((cam.y-halfH)/cell), j1 = Math.ceil((cam.y+halfH)/cell);
+  if ((i1-i0)*(j1-j0) > 4000) return;
+  ctx.fillStyle = "#c8dae8";
+  for (let j=j0;j<=j1;j++){
+    for (let i=i0;i<=i1;i++){
+      const h = (((i*73856093) ^ (j*19349663)) >>> 0);
+      const fx = i*cell + (h % 997)/997*cell;
+      const fy = j*cell + ((h>>10) % 991)/991*cell;
+      if (CV.onLand(fx, fy)) continue;
+      const ph = (h % 628)/100;
+      ctx.globalAlpha = .05 + .16*Math.max(0, Math.sin(t*1.1 + ph)) * (.5 + env.swell*2);
+      ctx.fillRect(T.X(fx), T.Y(fy), Math.max(1.2,T.S(2.6)), Math.max(1,T.S(.9)));
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// her wake, left behind in the water where she actually was
+const wake = [];
+let wakeT = 0;
+function wakeStep(dt){
+  wakeT -= dt;
+  if (wakeT <= 0 && ship.speedKn > .7){
+    wakeT = .09;
+    wake.push({ x: ship.x + (Math.random()-.5)*4, y: ship.y + (Math.random()-.5)*4,
+                a: Math.min(1, ship.speedKn/5), r: .9 + Math.random()*1.5 });
+    if (wake.length > 110) wake.shift();
+  }
+  for (const w of wake){
+    w.a -= dt*.42;
+    w.x += env.curX * dt; w.y += env.curY * dt;       // it goes with the tide
+    w.x += Math.sin(env.t*1.3 + w.y*.05) * dt * 1.2;  // and works in the swell
+  }
+  while (wake.length && wake[0].a <= 0) wake.shift();
+}
+function drawWake(t){
+  for (const w of wake){
+    const age = 1 - Math.max(0, w.a);
+    const r = (w.r || 1.2) * (1 + age * 2.4);          // it spreads as it ages
+    const x = T.X(w.x), y = T.Y(w.y);
+    ctx.globalAlpha = Math.max(0, w.a) * .20;
+    ctx.fillStyle = "#0c161d";                          // torn water, dark
+    ctx.beginPath();
+    ctx.ellipse(x, y, T.S(r), T.S(r*.72), 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = Math.max(0, w.a) * .16 * (1 - age);
+    ctx.strokeStyle = "#cfe6f4";                        // and a bright rim
+    ctx.lineWidth = Math.max(1, T.S(.5));
+    ctx.beginPath();
+    ctx.ellipse(x, y, T.S(r*.8), T.S(r*.55), 0, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function poly(pts, close=true){
+  ctx.beginPath();
+  ctx.moveTo(T.X(pts[0][0]), T.Y(pts[0][1]));
+  for (let i=1;i<pts.length;i++) ctx.lineTo(T.X(pts[i][0]), T.Y(pts[i][1]));
+  if (close) ctx.closePath();
+}
+// The shore is a PLACE, not the edge of the playfield: the terrace, the
+// timber coming down to it, the stockade, the chute head with its yard of
+// stacked wood, the tender's hut, the road down the gully, the wharf. It is
+// the title screen, seen from above.
+let landRnd = 0;
+function rnd2(i){                       // stable pseudo-random per index
+  let s2 = (i * 1103515245 + 12345) >>> 0;
+  s2 = (s2 ^ (s2 >>> 15)) >>> 0;
+  return (s2 % 100000) / 100000;
+}
+function drawLand(t){
+  poly(CV.LAND);
+  ctx.fillStyle = "#26312c";                     // ground, not battleship grey
+  ctx.fill();
+
+  ctx.save();
+  poly(CV.LAND); ctx.clip();
+
+  // open grass and scrub on the terrace
+  for (let i = 0; i < 900; i++){
+    const x = -1000 + rnd2(i*3) * 2900;
+    const y = -1100 + rnd2(i*3+1) * 1150;
+    if (!CV.onLand(x, y)) continue;
+    ctx.fillStyle = rnd2(i*3+2) > .5 ? "rgba(58,72,58,.55)" : "rgba(40,52,44,.6)";
+    const r = 5 + rnd2(i)*12;
+    ctx.beginPath();
+    ctx.ellipse(T.X(x), T.Y(y), T.S(r), T.S(r*.8), 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // redwood, pine and fir, thickening inland, coming down close to the shore
+  for (let i = 0; i < 1400; i++){
+    const x = -1100 + rnd2(i*5+7) * 3100;
+    const y = -1250 + rnd2(i*5+8) * 1300;
+    if (!CV.onLand(x, y)) continue;
+    const ds = CV.distToShore(x, y);
+    if (ds < 16) continue;
+    if (rnd2(i*5+9) > Math.min(1, ds / 150) * .95 + .05) continue;
+    const r = 4 + rnd2(i*5+10) * 9;
+    ctx.fillStyle = "rgba(10,17,14,.55)";                 // shadow
+    ctx.beginPath();
+    ctx.ellipse(T.X(x)+T.S(1.6), T.Y(y)+T.S(2), T.S(r), T.S(r*.9), 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = rnd2(i*5+11) > .6 ? "#26362c" : "#1d2b24";
+    ctx.beginPath();
+    ctx.ellipse(T.X(x), T.Y(y), T.S(r), T.S(r*.9), 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // the cliff face: a dark band with gullies cut into it
+  ctx.strokeStyle = "rgba(14,19,25,.8)";
+  ctx.lineWidth = Math.max(3, T.S(13));
+  poly(CV.LAND); ctx.stroke();
+  ctx.strokeStyle = "rgba(128,146,160,.34)";
+  ctx.lineWidth = Math.max(1, T.S(1));
+  for (let i = 0; i < CV.LAND.length; i++){
+    const p0 = CV.LAND[i], p1 = CV.LAND[(i+1)%CV.LAND.length];
+    if (p0[1] < -700) continue;
+    const len = Math.hypot(p1[0]-p0[0], p1[1]-p0[1]);
+    const nx = -(p1[1]-p0[1])/len, ny = (p1[0]-p0[0])/len;
+    const n = Math.max(1, Math.floor(len/22));
+    for (let k = 0; k < n; k++){
+      const f = (k+.5)/n;
+      const px = p0[0]+(p1[0]-p0[0])*f, py = p0[1]+(p1[1]-p0[1])*f;
+      const d = 8 + ((k*37 + i*11) % 14);
+      ctx.beginPath();
+      ctx.moveTo(T.X(px), T.Y(py));
+      ctx.lineTo(T.X(px + nx*d), T.Y(py + ny*d));
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // the short broad sand beach, and the creek that comes down to it
+  // "a short, broad sand beach" at the head of the cove, with the tide line
+  ctx.fillStyle = "rgba(122,112,90,.75)";
+  ctx.beginPath();
+  ctx.moveTo(T.X(104), T.Y(-408));
+  ctx.quadraticCurveTo(T.X(210), T.Y(-420), T.X(304), T.Y(-402));
+  ctx.quadraticCurveTo(T.X(206), T.Y(-392), T.X(104), T.Y(-398));
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(196,206,214,.30)"; ctx.lineWidth = Math.max(1,T.S(.8));
+  ctx.beginPath();
+  ctx.moveTo(T.X(106), T.Y(-399));
+  ctx.quadraticCurveTo(T.X(208), T.Y(-393), T.X(302), T.Y(-403));
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(120,150,170,.55)"; ctx.lineWidth = Math.max(1,T.S(1.8));
+  ctx.beginPath();
+  ctx.moveTo(T.X(206), T.Y(-408));
+  ctx.quadraticCurveTo(T.X(216), T.Y(-476), T.X(192), T.Y(-556));
+  ctx.stroke();
+
+  // the road down the gully to the cove, cut into the cliff's northern rim
+  ctx.strokeStyle = "rgba(104,96,78,.5)"; ctx.lineWidth = Math.max(1,T.S(2.2));
+  ctx.beginPath();
+  ctx.moveTo(T.X(-90), T.Y(-470));
+  ctx.bezierCurveTo(T.X(-20), T.Y(-430), T.X(-60), T.Y(-370), T.X(30), T.Y(-330));
+  ctx.bezierCurveTo(T.X(80), T.Y(-312), T.X(60), T.Y(-352), T.X(120), T.Y(-356));
+  ctx.stroke();
+
+  // THE CHUTE HEAD: the lumber yard, the tender's hut, the winch, the fence
+  lumberYard(t);
+
+  // the stockade on the terrace, and the chapel with its Orthodox cross
+  ctx.fillStyle = "#2f3b46";
+  ctx.fillRect(T.X(-96), T.Y(-600), T.S(100), T.S(83));
+  ctx.strokeStyle = "rgba(176,192,206,.55)"; ctx.lineWidth = Math.max(1,T.S(1.4));
+  ctx.strokeRect(T.X(-96), T.Y(-600), T.S(100), T.S(83));
+  for (const [bx,by,bw,bh] of [[-88,-592,15,11],[-64,-590,19,13],[-34,-594,13,10],[-16,-556,14,11]]){
+    ctx.fillStyle = "#3d4a54";
+    ctx.fillRect(T.X(bx), T.Y(by), T.S(bw), T.S(bh));
+    ctx.fillStyle = "rgba(255,196,110,.45)";
+    ctx.fillRect(T.X(bx+bw*.35), T.Y(by+bh*.4), T.S(bw*.24), T.S(bh*.24));
+  }
+  ctx.fillStyle = "#44515b";                        // the chapel
+  ctx.fillRect(T.X(-60), T.Y(-568), T.S(14), T.S(10));
+  ctx.strokeStyle = "#9db0bd"; ctx.lineWidth = Math.max(1, T.S(.7));
+  ctx.beginPath();                                  // its Orthodox cross
+  ctx.moveTo(T.X(-53), T.Y(-570)); ctx.lineTo(T.X(-53), T.Y(-562));
+  ctx.moveTo(T.X(-55), T.Y(-568.6)); ctx.lineTo(T.X(-51), T.Y(-568.6));
+  ctx.moveTo(T.X(-56), T.Y(-566.8)); ctx.lineTo(T.X(-50), T.Y(-566.8));
+  ctx.moveTo(T.X(-55.4), T.Y(-563.6)); ctx.lineTo(T.X(-50.6), T.Y(-564.6));
+  ctx.stroke();
+}
+
+// a building seen from above: shadow, walls, a ridge down the roof, and a
+// lit window. The ridge is the thing that says "roof" rather than "box".
+function hut(x, y, w, h, lamp){
+  ctx.fillStyle = "rgba(8,11,16,.55)";
+  ctx.fillRect(T.X(x)+T.S(1.1), T.Y(y)+T.S(1.3), T.S(w), T.S(h));
+  ctx.fillStyle = "#4b5862";
+  ctx.fillRect(T.X(x), T.Y(y), T.S(w), T.S(h));
+  ctx.fillStyle = "#59666f";
+  ctx.fillRect(T.X(x), T.Y(y), T.S(w), T.S(h*.5));
+  ctx.strokeStyle = "rgba(180,196,210,.6)"; ctx.lineWidth = Math.max(1, T.S(.45));
+  ctx.beginPath();                                   // the ridge
+  ctx.moveTo(T.X(x), T.Y(y + h*.5)); ctx.lineTo(T.X(x + w), T.Y(y + h*.5));
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(14,19,25,.7)";
+  ctx.strokeRect(T.X(x), T.Y(y), T.S(w), T.S(h));
+  if (lamp){
+    ctx.fillStyle = "rgba(255,196,110,.75)";
+    ctx.fillRect(T.X(x + w*.62), T.Y(y + h*.66), T.S(w*.2), T.S(h*.2));
+  }
+}
+
+// the working yard at the head of the chute
+function lumberYard(t){
+  // stacked cordwood and posts waiting to go down
+  // A cord is four feet by four by eight. These are stacks of them,
+  // about twenty feet long: roughly two yards by six.
+  // CORDWOOD, seen from above, is a rick of round billets: you see the END
+  // GRAIN. Drawing the ends is what makes it read as wood and not as a box.
+  for (let i = 0; i < 12; i++){
+    const x = -30 + (i % 4) * 9.5, y = -346 + Math.floor(i/4) * 6.4;
+    ctx.fillStyle = "rgba(8,11,16,.5)";                       // its shadow
+    ctx.fillRect(T.X(x)+T.S(.8), T.Y(y)+T.S(.9), T.S(7.6), T.S(4));
+    ctx.fillStyle = "#6b4418";                                // the rick
+    ctx.fillRect(T.X(x), T.Y(y), T.S(7.6), T.S(4));
+    const cols = 6, rows = 3;
+    for (let cx2 = 0; cx2 < cols; cx2++){
+      for (let ry = 0; ry < rows; ry++){
+        ctx.fillStyle = (cx2 + ry + i) % 3 ? C.timber : C.timberLit;
+        ctx.beginPath();
+        ctx.arc(T.X(x + .8 + cx2*1.24), T.Y(y + .8 + ry*1.24),
+                Math.max(.8, T.S(.52)), 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+    ctx.strokeStyle = "rgba(20,14,8,.6)"; ctx.lineWidth = Math.max(1, T.S(.4));
+    ctx.strokeRect(T.X(x), T.Y(y), T.S(7.6), T.S(4));
+  }
+  // sawn posts and ties, stacked square, so the two cargoes look different
+  for (let i = 0; i < 4; i++){
+    const x = 2 + (i%2)*9, y = -352 + Math.floor(i/2)*5;
+    ctx.fillStyle = "rgba(8,11,16,.5)";
+    ctx.fillRect(T.X(x)+T.S(.7), T.Y(y)+T.S(.8), T.S(7), T.S(3.2));
+    ctx.fillStyle = "#8a5a1e";
+    ctx.fillRect(T.X(x), T.Y(y), T.S(7), T.S(3.2));
+    ctx.strokeStyle = "rgba(242,166,60,.7)"; ctx.lineWidth = Math.max(1, T.S(.35));
+    for (let k = 0; k < 5; k++){
+      ctx.beginPath();
+      ctx.moveTo(T.X(x), T.Y(y + .5 + k*.62));
+      ctx.lineTo(T.X(x + 7), T.Y(y + .5 + k*.62));
+      ctx.stroke();
+    }
+  }
+  // the chute tender's hut, and the winch house on the bluff edge
+  hut(6, -330, 8, 6, true);                        // the tender's hut, ~24 ft
+  hut(18, -322, 6.5, 5, false);                    // the winch house
+  // the winch drums inside it, which is what a wire chute ran on
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(1, T.S(.5));
+  for (const dx of [1.8, 4.2]){
+    ctx.beginPath();
+    ctx.arc(T.X(18+dx), T.Y(-319.5), Math.max(1, T.S(1.1)), 0, Math.PI*2);
+    ctx.stroke();
+  }
+  // the fence along the bluff, same as the title screen has
+  ctx.strokeStyle = "rgba(150,166,180,.45)"; ctx.lineWidth = Math.max(1,T.S(.9));
+  ctx.beginPath();
+  ctx.moveTo(T.X(-48), T.Y(-312));
+  ctx.lineTo(T.X(-6), T.Y(-306)); ctx.lineTo(T.X(34), T.Y(-298));
+  ctx.stroke();
+  for (let i=0;i<9;i++){
+    const f=i/8, px=-48+82*f, py=-312+14*f;
+    ctx.beginPath();
+    ctx.moveTo(T.X(px), T.Y(py-3)); ctx.lineTo(T.X(px), T.Y(py+4));
+    ctx.stroke();
+  }
+  // the stone wharf and warehouse, east of the chute
+  ctx.fillStyle = "rgba(8,11,16,.5)";              // the stone wharf
+  ctx.fillRect(T.X(52)+T.S(1), T.Y(-356)+T.S(1.2), T.S(34), T.S(8));
+  ctx.fillStyle = "#4b5259";
+  ctx.fillRect(T.X(52), T.Y(-356), T.S(34), T.S(8));
+  ctx.strokeStyle = "rgba(24,30,36,.7)"; ctx.lineWidth = Math.max(1,T.S(.4));
+  for (let i = 0; i <= 17; i++){                   // its stones, coursed
+    ctx.beginPath();
+    ctx.moveTo(T.X(52 + i*2), T.Y(-356)); ctx.lineTo(T.X(52 + i*2), T.Y(-348));
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(T.X(52), T.Y(-352)); ctx.lineTo(T.X(86), T.Y(-352)); ctx.stroke();
+  hut(58, -354, 13, 5, true);                      // Call's warehouse on it
+  // the derrick that worked it
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(1, T.S(.8));
+  ctx.beginPath();
+  ctx.moveTo(T.X(80), T.Y(-351)); ctx.lineTo(T.X(88), T.Y(-345));
+  ctx.stroke();
+  ctx.fillStyle = "#241c14";
+  ctx.beginPath(); ctx.arc(T.X(80), T.Y(-351), Math.max(1, T.S(.9)), 0, Math.PI*2);
+  ctx.fill();
+}
+
+// BULL KELP, which is what grows on this coast: a long stipe anchored to a
+// rock on the bottom, a round gas-filled float at the surface, and long
+// blades trailing away downtide from it. It lies over with the current, so
+// a kelp bed is also a tide gauge, and Davidson uses it as a rock marker.
+function drawKelp(t){
+  const setA = Math.atan2(env.curX, env.curY);
+  for (let b2 = 0; b2 < CV.KELP.length; b2++){
+    const [kx, ky] = CV.KELP[b2];
+    for (let i = 0; i < 11; i++){
+      const r0 = rnd2(b2*40+i), r1 = rnd2(b2*40+i+7), r2 = rnd2(b2*40+i+19);
+      const px = kx + (r0-.5)*62, py = ky + (r1-.5)*52;
+      const sway = Math.sin(t*.55 + i*1.3 + b2) * .22;
+      const ang = setA + sway;
+      const len = 13 + r2*16;
+      // the float
+      ctx.fillStyle = "rgba(54,66,40,.85)";
+      ctx.beginPath();
+      ctx.ellipse(T.X(px), T.Y(py), T.S(1.9), T.S(1.5), 0, 0, Math.PI*2);
+      ctx.fill();
+      // the blades, streaming away with the set
+      ctx.strokeStyle = "rgba(62,80,48,.72)";
+      ctx.lineWidth = Math.max(1, T.S(1.1));
+      for (let k = -1; k <= 1; k++){
+        const a2 = ang + k*.30;
+        ctx.beginPath();
+        ctx.moveTo(T.X(px), T.Y(py));
+        ctx.quadraticCurveTo(
+          T.X(px + Math.sin(a2)*len*.5 + Math.cos(a2)*4),
+          T.Y(py + Math.cos(a2)*len*.5 - Math.sin(a2)*4),
+          T.X(px + Math.sin(a2)*len), T.Y(py + Math.cos(a2)*len));
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+const ALL_ROCKS = CV.ROCKS.concat(CV.SHORE_ROCKS);
+const SHAPES = new Map();
+function shapeOf(r, i){
+  if (!SHAPES.has(i)) SHAPES.set(i, CV.rockShape(r.seed || (i*7919+13), r.r));
+  return SHAPES.get(i);
+}
+function drawRocks(t){
+  for (let i = 0; i < ALL_ROCKS.length; i++){
+    const r = ALL_ROCKS[i];
+    const px = T.X(r.x), py = T.Y(r.y);
+    if (px < -120 || px > W+120 || py < -120 || py > H+120) continue;
+    const sh = shapeOf(r, i);
+    const brk = r.awash ? (.35 + .65*Math.max(0, Math.sin(t*.8 + r.x*.03))) : .55;
+
+    // broken water round it, which is how you see a rock at all
+    ctx.globalAlpha = .10 + .30*brk;
+    ctx.fillStyle = C.foam;
+    ctx.beginPath();
+    ctx.ellipse(px, py, T.S(r.r*1.7), T.S(r.r*1.35), r.x, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // the stone: an irregular body, a lit top face, a hard shadow side
+    ctx.beginPath();
+    ctx.moveTo(px + T.S(sh[0][0]), py + T.S(sh[0][1]));
+    for (const [sx, sy] of sh) ctx.lineTo(px + T.S(sx), py + T.S(sy));
+    ctx.closePath();
+    ctx.fillStyle = r.awash ? "#2b3742" : (r.high ? "#4a555d" : "#39444d");
+    ctx.fill();
+    ctx.strokeStyle = "rgba(12,17,23,.75)";
+    ctx.lineWidth = Math.max(1, T.S(.7));
+    ctx.stroke();
+    // a facet catching what light there is, up and to the left
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = r.awash ? "rgba(150,172,190,.28)" : "rgba(170,190,206,.34)";
+    ctx.beginPath();
+    ctx.moveTo(px - T.S(r.r), py - T.S(r.r));
+    ctx.lineTo(px + T.S(r.r*.5), py - T.S(r.r));
+    ctx.lineTo(px - T.S(r.r*.45), py + T.S(r.r*.35));
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(8,12,17,.45)";
+    ctx.beginPath();
+    ctx.moveTo(px + T.S(r.r), py + T.S(r.r));
+    ctx.lineTo(px + T.S(r.r), py - T.S(r.r*.2));
+    ctx.lineTo(px - T.S(r.r*.2), py + T.S(r.r));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // a seal or two hauled out, where they always are
+    if (r.seal && !r.awash){
+      for (let k = 0; k < 1 + (i % 2); k++){
+        const sa = (i*1.7 + k*2.3);
+        const sx2 = r.x + Math.cos(sa)*r.r*.35, sy2 = r.y + Math.sin(sa)*r.r*.3;
+        const lift = Math.sin(t*.5 + i + k) * .25;
+        ctx.save();
+        ctx.translate(T.X(sx2), T.Y(sy2));
+        ctx.rotate(sa + lift);
+        ctx.fillStyle = "#4a4237";
+        ctx.beginPath();
+        ctx.ellipse(0, 0, T.S(2.4), T.S(1.15), 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#565042";
+        ctx.beginPath();                       // head, lifted at the swell
+        ctx.ellipse(T.S(2.1), T.S(-.5 - lift), T.S(.85), T.S(.7), 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // white water actually breaking over the ones that cover and uncover
+    if (r.awash && brk > .6){
+      ctx.globalAlpha = (brk-.6)*1.6;
+      ctx.strokeStyle = C.foam; ctx.lineWidth = Math.max(1, T.S(1.3));
+      ctx.beginPath();
+      ctx.ellipse(px, py, T.S(r.r*1.15), T.S(r.r*.9), r.x, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// the offshore rocks that have iron in them, and the marks at the entrance
+function drawFastenings(t){
+  for (let i = 0; i < CV.FASTENINGS.length; i++){
+    const f = CV.FASTENINGS[i];
+    const used = ship.lines > i;
+    const live = phase === "moor" || phase === "load";
+    if (!live && !used) continue;
+    const x = T.X(f.x), y = T.Y(f.y);
+    const pulse = .4 + .35*Math.sin(t*2.4 + i);
+    ctx.save();
+    // a ring round each one, amber when it still wants a line, green when it has one
+    ctx.strokeStyle = used ? "rgba(127,214,162,.85)" : `rgba(242,166,60,${pulse})`;
+    ctx.lineWidth = Math.max(1.2, T.S(.9));
+    ctx.beginPath(); ctx.arc(x, y, T.S(7), 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([T.S(2), T.S(3)]);
+    ctx.beginPath(); ctx.arc(x, y, T.S(11), 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    if (live){
+      ctx.globalAlpha = .75;
+      ctx.fillStyle = used ? "#7fd6a2" : "#f2a63c";
+      ctx.font = `${Math.max(9, Math.min(13, T.S(3.4)))}px ` +
+                 getComputedStyle(document.body).fontFamily;
+      ctx.textAlign = "center";
+      ctx.fillText(`${i+1}`, x, y - T.S(13));
+    }
+    ctx.restore();
+  }
+  for (const m of CV.MOORING_ROCKS){
+    ctx.save();
+    ctx.strokeStyle = "rgba(232,220,196,.75)";
+    ctx.lineWidth = Math.max(1.2, T.S(1.1));
+    ctx.beginPath(); ctx.arc(T.X(m.x), T.Y(m.y), T.S(3.2), 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(T.X(m.x), T.Y(m.y), T.S(5.4), 0, Math.PI*2);
+    ctx.globalAlpha = .35; ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.fillStyle = "#3a3228";                          // the staple in the rock
+    ctx.fillRect(T.X(m.x)-T.S(.7), T.Y(m.y)-T.S(4.6), T.S(1.4), T.S(3));
+    ctx.restore();
+  }
+  for (const b2 of CV.APPROACH_MARKS){
+    const bob = Math.sin(t*.8 + b2.x*.02) * 1.6;
+    const col = b2.kind === "port" ? "#c04a32" : "#2f6f4e";
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(T.X(b2.x), T.Y(b2.y + bob - 5.5));
+    ctx.lineTo(T.X(b2.x + 3.4), T.Y(b2.y + bob + 3));
+    ctx.lineTo(T.X(b2.x - 3.4), T.Y(b2.y + bob + 3));
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = .28; ctx.strokeStyle = C.foam;
+    ctx.lineWidth = Math.max(1, T.S(1));
+    ctx.beginPath();
+    ctx.ellipse(T.X(b2.x), T.Y(b2.y+bob+3), T.S(6), T.S(3), 0, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// surf along the whole shore, so the edge of the land is a place where the
+// sea is doing something and not just a line on a map
+function drawSurf(t){
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 0; i < CV.LAND.length; i++){
+    const a = CV.LAND[i], b = CV.LAND[(i+1) % CV.LAND.length];
+    if (a[1] < -700 && b[1] < -700) continue;
+    const len = Math.hypot(b[0]-a[0], b[1]-a[1]);
+    const nx = (b[1]-a[1])/len, ny = -(b[0]-a[0])/len;
+    const n = Math.max(2, Math.min(40, Math.floor(len/18)));
+    for (let k = 0; k < n; k++){
+      const f0 = k/n, f1 = (k+.72)/n;
+      const ph = Math.sin(t*1.1 + i*1.7 + k*.8);
+      const off = 3 + 5*Math.max(0, ph) + env.swell*16;
+      ctx.globalAlpha = .12 + .3*Math.max(0, ph) * (.5 + env.swell*1.6);
+      ctx.strokeStyle = C.foam;
+      ctx.lineWidth = Math.max(1, T.S(2.2));
+      ctx.beginPath();
+      ctx.moveTo(T.X(a[0]+(b[0]-a[0])*f0 + nx*off), T.Y(a[1]+(b[1]-a[1])*f0 + ny*off));
+      ctx.lineTo(T.X(a[0]+(b[0]-a[0])*f1 + nx*off), T.Y(a[1]+(b[1]-a[1])*f1 + ny*off));
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawChute(t){
+  const [hx,hy] = CV.CHUTE.head, [ex,ey] = CV.CHUTE.end;
+  ctx.strokeStyle = "#241c14"; ctx.lineWidth = Math.max(2, T.S(1.5));
+  ctx.beginPath(); ctx.moveTo(T.X(hx), T.Y(hy)); ctx.lineTo(T.X(ex), T.Y(ey)); ctx.stroke();
+  ctx.strokeStyle = "#a35f18"; ctx.lineWidth = Math.max(1, T.S(.8));
+  ctx.beginPath(); ctx.moveTo(T.X(hx), T.Y(hy)); ctx.lineTo(T.X(ex), T.Y(ey)); ctx.stroke();
+  // the swing apron, nearly level at its outer end, swinging in the swell
+  const a = Math.atan2(ey-hy, ex-hx) + Math.sin(t*.5)*.05;
+  const ax = ex + Math.cos(a)*CV.CHUTE.apron, ay = ey + Math.sin(a)*CV.CHUTE.apron;
+  ctx.strokeStyle = C.timberLit; ctx.lineWidth = Math.max(1, T.S(1.5));
+  ctx.beginPath(); ctx.moveTo(T.X(ex), T.Y(ey)); ctx.lineTo(T.X(ax), T.Y(ay)); ctx.stroke();
+  // the towers it stood on, "wooden A-frames or towers built into the
+  // shore's rocky outcroppings", their legs seated in cut-out rebates
+  for (let i = 1; i <= 3; i++){
+    const f = i/4;
+    const tx2 = hx + (ex-hx)*f, ty2 = hy + (ey-hy)*f;
+    const ang = Math.atan2(ey-hy, ex-hx) + Math.PI/2;
+    ctx.strokeStyle = "rgba(36,28,20,.9)"; ctx.lineWidth = Math.max(1, T.S(.9));
+    ctx.beginPath();
+    ctx.moveTo(T.X(tx2 + Math.cos(ang)*4), T.Y(ty2 + Math.sin(ang)*4));
+    ctx.lineTo(T.X(tx2 - Math.cos(ang)*4), T.Y(ty2 - Math.sin(ang)*4));
+    ctx.stroke();
+  }
+
+  // the lamp at the chute head
+  const g = ctx.createRadialGradient(T.X(hx),T.Y(hy),0,T.X(hx),T.Y(hy),T.S(46));
+  g.addColorStop(0,"rgba(255,196,110,.5)"); g.addColorStop(1,"rgba(255,196,110,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(T.X(hx-46), T.Y(hy-46), T.S(92), T.S(92));
+  // the stone wharf and warehouse, east of the chute
+  ctx.fillStyle = "#2c353d";
+  ctx.fillRect(T.X(52), T.Y(-352), T.S(74), T.S(20));
+  ctx.fillStyle = "#39454f";
+  ctx.fillRect(T.X(70), T.Y(-348), T.S(34), T.S(13));
+  return [ax, ay];
+}
+function drawBuoys(t){
+  for (const b of CV.BUOYS){
+    const bob = Math.sin(t*.7 + b.x*.02)*1.4;
+    if (b.kind === "moor"){
+      ctx.save();
+      ctx.translate(T.X(b.x), T.Y(b.y+bob));
+      ctx.rotate(b.x*.7);
+      ctx.fillStyle = "#3a2c1d";
+      ctx.fillRect(T.S(-8), T.S(-2.2), T.S(16), T.S(4.4));   // the floating log
+      ctx.fillStyle = "rgba(242,166,60,.4)";
+      ctx.fillRect(T.S(-6.5), T.S(-1.6), T.S(13), T.S(1.3));
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#c04a32";                              // the danger buoy
+      ctx.beginPath(); ctx.arc(T.X(b.x), T.Y(b.y+bob), T.S(4.4), 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = "rgba(226,120,96,.55)"; ctx.lineWidth = Math.max(1,T.S(1));
+      ctx.beginPath(); ctx.arc(T.X(b.x), T.Y(b.y+bob), T.S(9), 0, Math.PI*2); ctx.stroke();
+    }
+  }
+  ctx.strokeStyle = "rgba(226,214,190,.45)"; ctx.lineWidth = Math.max(1,T.S(1.2));
+  for (const [rx,ry] of CV.RINGBOLTS){
+    ctx.beginPath(); ctx.arc(T.X(rx), T.Y(ry), T.S(2.4), 0, Math.PI*2); ctx.stroke();
+  }
+}
+function drawBerth(t, ship, phase){
+  if (phase !== "approach" && phase !== "moor") return;
+  const B = CV.BERTH;
+  const pulse = .35 + .3*Math.sin(t*2);
+  ctx.save();
+  ctx.setLineDash([T.S(5), T.S(5)]);
+  ctx.strokeStyle = `rgba(242,166,60,${pulse})`;
+  ctx.lineWidth = Math.max(1, T.S(1.2));
+  ctx.beginPath(); ctx.arc(T.X(B.x), T.Y(B.y), T.S(B.tolPos), 0, Math.PI*2); ctx.stroke();
+  ctx.restore();
+  // the heading she must lie on: broadside to the chute, head out
+  const r = B.heading*Math.PI/180;
+  ctx.strokeStyle = `rgba(242,166,60,${pulse*.9})`;
+  ctx.beginPath();
+  ctx.moveTo(T.X(B.x - Math.sin(r)*20), T.Y(B.y + Math.cos(r)*20));
+  ctx.lineTo(T.X(B.x + Math.sin(r)*20), T.Y(B.y - Math.cos(r)*20));
+  ctx.stroke();
+}
+function drawMoorLines(ship, n){
+  if (!n) return;
+  const pts = CV.FASTENINGS;
+  ctx.strokeStyle = "rgba(214,206,186,.55)";
+  ctx.lineWidth = Math.max(1, T.S(1.1));
+  for (let i=0;i<Math.min(n,6);i++){
+    const p = pts[i];
+    const off = (i%2 ? 1 : -1) * 9;
+    const fx = Math.sin(ship.hdg), fy = -Math.cos(ship.hdg);
+    ctx.beginPath();
+    ctx.moveTo(T.X(ship.x + fx*off), T.Y(ship.y + fy*off));
+    ctx.lineTo(T.X(p.x), T.Y(p.y));
+    ctx.stroke();
+  }
+}
+
+// ---------------------------------------------------- rain, fog, flash
+const rain = Array.from({length:420}, () => ({
+  x: Math.random(), y: Math.random(), l: .018+Math.random()*.035, s: .7+Math.random()*.8,
+}));
+function drawRain(dt, windFrom){
+  const drift = Math.sin((windFrom+180)*Math.PI/180)*.5;
+  ctx.strokeStyle = "rgba(190,208,222,.34)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const r of rain){
+    r.y += dt*r.s*.75; r.x += dt*drift*.12;
+    if (r.y > 1){ r.y = -.05; r.x = Math.random(); }
+    if (r.x > 1) r.x -= 1; if (r.x < 0) r.x += 1;
+    const X = r.x*W, Y = r.y*H;
+    ctx.moveTo(X, Y); ctx.lineTo(X - drift*30, Y + r.l*H);
+  }
+  ctx.stroke();
+}
+let flash=0, nextFlash=6+Math.random()*10, bolt=null, boltLife=0;
+function makeBolt(){
+  const pts=[]; let x=Math.random()*W, y=-10;
+  const yEnd = H*(.12+Math.random()*.2);
+  const rake=(Math.random()-.5)*40;
+  while (y<yEnd){ y += 12+Math.random()*26; x += (Math.random()-.5)*46 + rake*.1; pts.push([x,y]); }
+  return {pts, w:1.2+Math.random()*2, life:.12+Math.random()*.2};
+}
+function drawFlashAndBolt(dt){
+  nextFlash -= dt;
+  if (nextFlash<=0){
+    flash=1; nextFlash=6+Math.random()*12; bolt=makeBolt(); boltLife=bolt.life;
+    // thunder comes AFTER the flash, and a near strike cracks where a
+    // distant one only rumbles
+    thunder(Math.random() < .4);
+  }
+  flash=Math.max(0,flash-dt*3.2); boltLife=Math.max(0,boltLife-dt);
+  if (bolt && boltLife>0){
+    const a=Math.min(1,boltLife*4);
+    ctx.save(); ctx.lineCap="round"; ctx.lineJoin="round";
+    for (const [w,c,al] of [[bolt.w*5,"#7fa8d0",.24],[bolt.w*2,"#bcd8f0",.5],[bolt.w,"#f2f8ff",1]]){
+      ctx.globalAlpha=a*al; ctx.strokeStyle=c; ctx.lineWidth=w;
+      ctx.beginPath(); ctx.moveTo(bolt.pts[0][0],bolt.pts[0][1]);
+      for (const p of bolt.pts) ctx.lineTo(p[0],p[1]);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (flash>0){
+    ctx.save(); ctx.globalAlpha=flash*.15; ctx.fillStyle="#cfe0ef";
+    ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+}
+// a bearing mark to the chute while you are still off the place
+function drawRose(){
+  const R = Math.min(96, W*.075), cx = W - R - 34, cy = 200 + R;
+  ctx.save();
+  ctx.globalAlpha = .8;
+  ctx.strokeStyle = "rgba(170,186,200,.55)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, R*.62, 0, Math.PI*2); ctx.stroke();
+  for (let i=0;i<16;i++){
+    const a = i*Math.PI/8 - Math.PI/2;
+    const r0 = i%4 ? R*.9 : R*.78;
+    ctx.beginPath();
+    ctx.moveTo(cx+Math.cos(a)*r0, cy+Math.sin(a)*r0);
+    ctx.lineTo(cx+Math.cos(a)*R, cy+Math.sin(a)*R);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = .75;
+  ctx.fillStyle = "#8b97a3";
+  ctx.font = "10px " + getComputedStyle(document.body).fontFamily;
+  ctx.textAlign = "center";
+  ctx.fillText("N", cx, cy - R - 6);
+  ctx.globalAlpha = 1;
+
+  const arrow = (dirDeg, len, col, wid) => {      // dirDeg = where it is going
+    const a = (dirDeg - 90) * Math.PI/180;
+    const ex = cx + Math.cos(a)*len, ey = cy + Math.sin(a)*len;
+    ctx.strokeStyle = col; ctx.lineWidth = wid;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.save(); ctx.translate(ex, ey); ctx.rotate(a);
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(8,0); ctx.lineTo(-5,4); ctx.lineTo(-5,-4);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  };
+  // the wind, blowing the way it blows
+  arrow((env.windFrom + 180) % 360, R*.82, "rgba(226,236,244,.75)", 2);
+  // the set of the tide
+  const setDir = (Math.atan2(env.curX, -env.curY)*180/Math.PI + 360) % 360;
+  arrow(setDir, R*.56, "rgba(242,166,60,.9)", 2.4);
+  // her head
+  arrow(degOf(ship.hdg), R*.4, "rgba(127,214,162,.9)", 2);
+  ctx.save();
+  ctx.globalAlpha = .6; ctx.fillStyle = "#8b97a3";
+  ctx.font = "10px " + getComputedStyle(document.body).fontFamily;
+  ctx.textAlign = "right";
+  ctx.fillText("wind", cx + R, cy + R + 14);
+  ctx.fillStyle = "#f2a63c"; ctx.fillText("tide", cx + R, cy + R + 27);
+  ctx.fillStyle = "#7fd6a2"; ctx.fillText("her head", cx + R, cy + R + 40);
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawBearingMark(){
+  if (phase !== "approach") return;
+  const B = CV.BERTH;
+  const sx = T.X(B.x), sy = T.Y(B.y);
+  if (sx > 40 && sx < W-40 && sy > 40 && sy < H-40) return;
+  const cx = W/2, cy = H/2;
+  const a = Math.atan2(sy-cy, sx-cx);
+  const r = Math.min(W,H)*.40;
+  const px = cx + Math.cos(a)*r, py = cy + Math.sin(a)*r;
+  ctx.save();
+  ctx.translate(px, py); ctx.rotate(a);
+  ctx.globalAlpha = .55; ctx.fillStyle = "#f2a63c";
+  ctx.beginPath(); ctx.moveTo(13,0); ctx.lineTo(-8,6); ctx.lineTo(-8,-6);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha = .5; ctx.fillStyle = "#f2a63c";
+  ctx.font = "13px " + getComputedStyle(document.body).fontFamily;
+  ctx.textAlign = "center";
+  ctx.fillText("the chute", px - Math.cos(a)*26, py - Math.sin(a)*26 + 4);
+  ctx.globalAlpha = 1;
+}
+
+function drawVignette(){
+  const g = ctx.createRadialGradient(W/2,H*.52,Math.min(W,H)*.28,W/2,H*.52,Math.max(W,H)*.82);
+  g.addColorStop(0,"rgba(11,16,22,0)"); g.addColorStop(1,"rgba(7,10,15,.58)");
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+// ------------------------------------------------- the elevation inset
+// the same schooner as the title screen, drawn small, so you can watch
+// the deckload grow as the chute fills her
+function drawInset(ship, t){
+  const bw = Math.min(300, W*.26), k = bw/470;
+  const bx = W - bw - 30, by = H - 196;
+  const P = { X: x => bx + (x-640)*k, Y: y => by + (y-576)*k, S: v => v*k, C };
+  ctx.save();
+  const g = ctx.createRadialGradient(bx+bw*.5, by, 0, bx+bw*.5, by, bw*.75);
+  g.addColorStop(0, "rgba(9,13,19,.86)"); g.addColorStop(1, "rgba(9,13,19,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(bx-40, by-bw*.5, bw+80, bw);
+  ctx.globalAlpha = .95;
+  drawSchooner(ctx, P, t, { load: ship.cargo/CAPACITY, moor:false });
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = .5; ctx.fillStyle = "#8b97a3";
+  ctx.font = "11px " + getComputedStyle(document.body).fontFamily;
+  ctx.textAlign = "right";
+  ctx.fillText("her deckload", W - 30, by + 34);
+  ctx.restore();
+}
+
+// -------------------------------------------------------------- sound
+// A sea bed that rises with the swell, the rumble of a bundle running
+// down the chute, and one hard noise for going on the rocks. Synthesised
+// here rather than borrowed, so the game owns its audio outright.
+let A = null, seaGain = null, seaFilt = null, muted = false;
+let bellBuf = null, ropeBuf = null, thunNear = null, thunFar = null;
+async function loadClip(url){
+  try {
+    const r = await fetch(url);
+    return await A.decodeAudioData(await r.arrayBuffer());
+  } catch(e){ return null; }
+}
+function audioInit(){
+  if (A) return;
+  try { A = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return; }
+  if (A.state === "suspended") A.resume().catch(()=>{});
+  loadClip("bell.m4a").then(b => { bellBuf = b; });
+  loadClip("rope.m4a").then(b => { ropeBuf = b; });
+  loadClip("thunder-near.m4a").then(b => { thunNear = b; });
+  loadClip("thunder-far.m4a").then(b => { thunFar = b; });
+  const len = A.sampleRate * 2;
+  const buf = A.createBuffer(1, len, A.sampleRate);
+  const d = buf.getChannelData(0);
+  let v = 0;
+  for (let i=0;i<len;i++){ v = (v + (Math.random()*2-1)*.18) * .985; d[i] = v; }
+  const src = A.createBufferSource(); src.buffer = buf; src.loop = true;
+  seaFilt = A.createBiquadFilter(); seaFilt.type = "lowpass"; seaFilt.frequency.value = 520;
+  seaGain = A.createGain(); seaGain.gain.value = 0;
+  src.connect(seaFilt); seaFilt.connect(seaGain); seaGain.connect(A.destination);
+  src.start();
+}
+function seaLevel(){
+  if (!seaGain) return;
+  if (muted){ seaGain.gain.setTargetAtTime(0, A.currentTime, .2); return; }
+  const lvl = .06 + env.swell * .5 + Math.min(.12, ship.speedKn * .02);
+  seaGain.gain.setTargetAtTime(lvl, A.currentTime, .3);
+  seaFilt.frequency.setTargetAtTime(380 + env.swell*900, A.currentTime, .4);
+}
+// ---------------------------------------------------------------- the kit
+// Nothing here is a recording. Every one of these is built out of noise and
+// oscillators in the page, so the game owns its sound outright, and each is
+// shaped to a real thing you would hear at a chute.
+function noise(dur, curve){
+  const n = Math.floor(A.sampleRate * dur);
+  const b = A.createBuffer(1, n, A.sampleRate), d = b.getChannelData(0);
+  for (let i=0;i<n;i++){
+    const t = i/n;
+    d[i] = (Math.random()*2-1) * (curve ? curve(t) : (1-t));
+  }
+  return b;
+}
+function playBuf(buf, vol, filt, freq, q){
+  if (!A) return null;
+  const src = A.createBufferSource(); src.buffer = buf;
+  const g = A.createGain(); g.gain.value = vol;
+  let node = src;
+  if (filt){
+    const f = A.createBiquadFilter();
+    f.type = filt; f.frequency.value = freq; if (q) f.Q.value = q;
+    src.connect(f); node = f;
+  }
+  node.connect(g); g.connect(A.destination); src.start();
+  return { src, g };
+}
+function tone(type, f0, f1, dur, vol, delay){
+  if (!A) return;
+  const t0 = A.currentTime + (delay||0);
+  const o = A.createOscillator(), g = A.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t0);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20,f1), t0+dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  o.connect(g); g.connect(A.destination); o.start(t0); o.stop(t0+dur+.03);
+}
+function thud(freq, dur, vol){ tone("triangle", freq, freq*.45, dur, vol); }
+
+// A BUNDLE RUNNING DOWN THE CHUTE. Wood on wood in a wooden trough: a rush
+// that builds as it picks up speed, with the rattle of the boards under it,
+// and then the whole thing fetching up on her deck.
+function chuteRun(){
+  if (!sfxGate("chute: running down")) return;
+  if (!A) return;
+  const dur = 1.5;
+  const rush = noise(dur, t => Math.min(1, t*3.2) * (1 - t*.15) * .6);
+  const v = playBuf(rush, .22, "bandpass", 900, 1.1);
+  if (v) v.g.gain.setValueAtTime(.05, A.currentTime),
+         v.g.gain.linearRampToValueAtTime(.3, A.currentTime + dur*.8);
+  // the boards going by underneath it
+  for (let i=0;i<16;i++){
+    const t = (i/16)**1.4 * dur;
+    tone("square", 160 + Math.random()*90, 90, .045, .035, t);
+  }
+}
+function chuteLand(){
+  if (!sfxGate("chute: fetched up aboard")) return;                        // and fetching up aboard
+  thud(120 + Math.random()*40, .34, .17);
+  playBuf(noise(.22, t => (1-t)**2), .16, "lowpass", 1400);
+}
+
+// THUNDER, from Aodhan's recording. One file gave two: the crack at 2.0 s
+// with its roll away, and the softer roll later in it, which serves for a
+// strike further off. It still comes AFTER the flash, and the further off
+// the longer it takes to arrive, which is the only honest way to do it.
+function thunder(near){
+  const buf = near ? thunNear : thunFar;
+  if (!buf) return;
+  const delay = near ? .25 + Math.random()*.7 : 1.8 + Math.random()*3.6;
+  setTimeout(() => playClip(buf, near ? .85 : .5, near ? "thunder near" : "thunder far"), delay*1000);
+}
+
+// MAKING SAIL. Canvas going up: the halyard running through the blocks,
+// the cloth cracking as it fills, and the sheave squealing.
+function makeSail(up){
+  if (!sfxGate("making sail")) return;
+  if (!A) return;
+  const dur = .9;
+  playBuf(noise(dur, t => Math.sin(Math.PI*t) * (.6 + .4*Math.sin(t*38))),
+          up ? .16 : .11, "bandpass", up ? 1800 : 1200, .8);
+  tone("sine", up ? 420 : 300, up ? 900 : 200, .5, .035);   // the sheave
+}
+
+// A LINE MADE FAST. The rope running out, then the turn taken and brought up
+// solid against the bitts.
+function lineFast(n){
+  if (!sfxGate("line made fast")) return;
+  if (!A) return;
+  playBuf(noise(.4, t => (1-t)**1.6), .14, "bandpass", 2400, .7);   // running
+  setTimeout(() => {
+    thud(90 + n*6, .28, .2);                                        // brought up
+    playBuf(noise(.18, t => (1-t)**3), .1, "lowpass", 700);
+  }, 260);
+}
+
+// Nothing sounds in the first moment of a run. A sound on spawn is always
+// wrong, whatever fired it, and this makes that impossible rather than
+// unlikely.
+let sfxOpen = 0;
+window.__sfxLog = [];
+function sfxGate(name){
+  if (performance.now() < sfxOpen) return false;
+  window.__sfxLog.push(name + " @" + Math.round(performance.now()/100)/10 + "s");
+  if (window.__sfxLog.length > 60) window.__sfxLog.shift();
+  return true;
+}
+function playClip(buf, vol, tag){
+  if (!sfxGate(tag || "clip")) return;
+  if (!A || !buf || muted) return;
+  if (A.state === "suspended") A.resume().catch(()=>{});
+  const src = A.createBufferSource(); src.buffer = buf;
+  const g = A.createGain(); g.gain.value = vol;
+  src.connect(g); g.connect(A.destination);
+  src.start();
+}
+
+// A bell on the buoys. Sparingly: a bell buoy is a thing you notice once in
+// a while and then stop hearing, and that is how it should sound. It only
+// rings when you are near enough to one to hear it.
+let bellIn = 5 + Math.random()*7;
+function bellStep(dt){
+  bellIn -= dt;
+  if (bellIn > 0) return;
+  bellIn = 17 + Math.random()*20;
+  // the moorings AND the danger buoy on the sunken rock, which is the one
+  // you most want to hear
+  let d = 1e9;
+  for (const b of CV.BUOYS) d = Math.min(d, Math.hypot(ship.x-b.x, ship.y-b.y));
+  const REACH = 520;                         // a bell carries, in a calm
+  if (d > REACH) return;
+  playClip(bellBuf, Math.max(.3, Math.min(1.3, (1 - d/REACH) * 1.1 + .3)), "bell");
+}
+
+function crashSound(){
+  if (!sfxGate("the wreck")) return;
+  if (!A) return;
+  // her timbers going: a low boom, then wood splintering for a second or two
+  playBuf(noise(1.8, t => Math.pow(1-t, 2.2)), .5, "lowpass", 900);
+  tone("sawtooth", 78, 30, 1.2, .45);
+  for (let i=0;i<22;i++){
+    setTimeout(() => {
+      if (!A) return;
+      playBuf(noise(.12, t => (1-t)**2), .10 + Math.random()*.1,
+              "bandpass", 500 + Math.random()*2200, 2.2);
+    }, 60 + Math.random()*1600);
+  }
+}
+
+// ------------------------------------------------------------- state
+let env = makeWeather();
+// Start her out to the south-east, where a coaster up from San Francisco
+// would be, and put her head on the sailable heading nearest the cove: if
+// the wind is in the north-west, as it usually is, that means you cannot
+// lay the cove and must beat in. That is the real difficulty of the place.
+function startHeading(fromDeg, wantDeg){
+  const off = ((wantDeg - fromDeg) % 360 + 360) % 360;
+  if (off > 42 && off < 318) return wantDeg;
+  return fromDeg + (off <= 42 || off >= 318 ? (off < 180 ? 46 : -46) : 0);
+}
+let ship = makeVessel(760, 520, 0);
+ship.hdg = startHeading(env.windFrom, 326) * Math.PI/180;   // 326 = the cove, from her
+ship.canvas = .55;
+let phase = "brief", lost = null, tally = null;
+let holdT = 0, loadT = 0, elapsed = 0, strikes = [], canPass = false;
+let partT = 0;   // how long ago a line went, for the warning on screen
+let sailT = 0;   // so working the canvas does not squeal every frame
+let lineCool = 0, loadedFor = 0;   // a line takes a moment to run and be hove taut
+const keys = {};
+addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === "m"){
+    muted = !muted;
+    el("theme").muted = muted;
+    if (seaGain) seaGain.gain.setTargetAtTime(muted ? 0 : .12, A.currentTime, .1);
+  }
+  if (k === "enter"){
+    if (phase === "brief"){ begin(); }
+    else if (phase === "wrecking"){ endWreck(); }
+    else if (phase === "over"){ location.href = sailOn || location.pathname; }
+  }
+  if (k === " "){
+    e.preventDefault();
+    if (phase === "moor" && canPass && lineCool <= 0){
+      ship.lines++; lineCool = 1.1;
+      ship.warp = { x: CV.BERTH.x, y: CV.BERTH.y, hdg: CV.BERTH.heading*Math.PI/180 };
+      lineFast(ship.lines);
+    }
+    else if (phase === "load" && ship.lines >= 6 && loadedFor > 1.5) castOff();
+  }
+  // = skips the cove and takes you straight out to the San Francisco leg,
+  // with whatever she has aboard, or a part cargo if you have not loaded yet
+  if (k === "=" || k === "+"){
+    const cords = Math.max(18, Math.floor(ship.cargo) || 42);
+    location.href = "gate.html?cargo=" + cords;
+  }
+  if (k === "escape") location.href = "index.html";
+});
+addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+const el = id => document.getElementById(id);
+function card(html){
+  el("cardin").innerHTML = html;
+  el("card").classList.remove("gone");
+}
+function hideCard(){ el("card").classList.add("gone"); }
+
+function begin(){
+  hideCard();
+  phase = "approach";
+  audioInit();
+  sfxOpen = performance.now() + 2500;   // silence for the first moment
+  const a = document.getElementById("theme");
+  a.volume = 0; a.play().then(()=>{
+    const f=setInterval(()=>{ a.volume=Math.min(.5,a.volume+.02); if(a.volume>=.5) clearInterval(f); },110);
+  }).catch(()=>{});
+}
+function castOff(){
+  phase = "depart";
+  ship.moored = false; ship.lines = 0; ship.warp = null;
+}
+// She does not blink out. She breaks up and goes down, and you watch it.
+let wreck = null;
+function fail(reason, detail){
+  if (phase === "over" || phase === "wrecking") return;
+  crashSound();
+  lost = reason;
+  const fx = Math.sin(ship.hdg), fy = -Math.cos(ship.hdg);
+  wreck = {
+    t: 0, reason, detail,
+    halves: [
+      { x: ship.x + fx*7, y: ship.y + fy*7, hdg: ship.hdg, half: "fore",
+        vx: ship.vx*.5 + fy*.35, vy: ship.vy*.5 - fx*.35, om: .22, sink: 0 },
+      { x: ship.x - fx*7, y: ship.y - fy*7, hdg: ship.hdg, half: "aft",
+        vx: ship.vx*.5 - fy*.3, vy: ship.vy*.5 + fx*.3, om: -.3, sink: 0 },
+    ],
+    // her own broken timbers, always; her deckload, only if she had one
+    debris: Array.from({length: 18 + Math.floor(ship.cargo * 1.4)}, (_, i) => ({
+      x: ship.x + (Math.random()-.5)*26, y: ship.y + (Math.random()-.5)*26,
+      vx: (Math.random()-.5)*4, vy: (Math.random()-.5)*4,
+      a: Math.random()*6.28, om: (Math.random()-.5)*1.4,
+      len: 3 + Math.random()*5, lumber: i >= 18,
+    })),
+    foam: 0,
+  };
+  phase = "wrecking";
+}
+function wreckStep(dt){
+  const w = wreck; if (!w) return;
+  w.t += dt; w.foam = Math.min(1, w.foam + dt*2.2);
+  for (const h of w.halves){
+    h.x += (h.vx + env.curX*2) * dt; h.y += (h.vy + env.curY*2) * dt;
+    h.vx *= (1 - dt*.55); h.vy *= (1 - dt*.55);
+    h.hdg += h.om * dt; h.om *= (1 - dt*.5);
+    if (w.t > 1.6) h.sink = Math.min(1, h.sink + dt*.17);
+  }
+  for (const d2 of w.debris){
+    d2.x += (d2.vx + env.curX*3) * dt; d2.y += (d2.vy + env.curY*3) * dt;
+    d2.vx *= (1 - dt*.8); d2.vy *= (1 - dt*.8);
+    d2.a += d2.om * dt; d2.om *= (1 - dt*.6);
+  }
+  if (w.t > 7.2 && phase === "wrecking") endWreck();
+}
+function drawWreck(){
+  const w = wreck; if (!w) return;
+  // the sea boiling where she struck
+  ctx.globalAlpha = Math.max(0, .5 - w.t*.12) * w.foam;
+  ctx.fillStyle = C.foam;
+  ctx.beginPath();
+  ctx.ellipse(T.X(w.halves[0].x), T.Y(w.halves[0].y),
+              T.S(16 + w.t*22), T.S(12 + w.t*17), 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // her deckload and her timbers, adrift
+  for (const d2 of w.debris){
+    ctx.save();
+    ctx.translate(T.X(d2.x), T.Y(d2.y)); ctx.rotate(d2.a);
+    ctx.globalAlpha = .85;
+    ctx.fillStyle = d2.lumber ? C.timber : "#1d2731";
+    ctx.fillRect(T.S(-d2.len/2), T.S(-.7), T.S(d2.len), T.S(1.4));
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+
+  // the two halves of her, opening and going down
+  for (const h of w.halves){
+    const L = 28, B = 8.6;
+    ctx.save();
+    ctx.translate(T.X(h.x), T.Y(h.y)); ctx.rotate(h.hdg);
+    ctx.globalAlpha = 1 - h.sink;
+    const sc = 1 - h.sink*.35;
+    const b = B/2*sc, l = L/2*sc;
+    ctx.beginPath();
+    if (h.half === "fore"){
+      ctx.moveTo(0, T.S(-l - 2));
+      ctx.bezierCurveTo(T.S(b*.85), T.S(-l*.5), T.S(b), T.S(l*.1), T.S(b*.5), T.S(l*.2));
+      ctx.lineTo(T.S(-b*.7), T.S(l*.05));
+      ctx.bezierCurveTo(T.S(-b), T.S(-l*.2), T.S(-b*.85), T.S(-l*.5), 0, T.S(-l - 2));
+    } else {
+      ctx.moveTo(T.S(-b*.6), T.S(-l*.1));
+      ctx.lineTo(T.S(b*.75), T.S(-l*.25));
+      ctx.lineTo(T.S(b*.72), T.S(l));
+      ctx.lineTo(T.S(-b*.72), T.S(l));
+      ctx.closePath();
+    }
+    ctx.fillStyle = "#0d131a"; ctx.fill();
+    ctx.strokeStyle = "rgba(150,168,182,.35)";
+    ctx.lineWidth = Math.max(1, T.S(.8)); ctx.stroke();
+    // a spar gone over the side
+    ctx.strokeStyle = "#2a2118"; ctx.lineWidth = Math.max(1, T.S(1));
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(T.S(b*2.6*(h.half === "fore" ? 1 : -1)), T.S(l*1.3));
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+function endWreck(){
+  const reason = wreck.reason, detail = wreck.detail;
+  phase = "over";
+  card(`<h1>${reason}</h1><p>${detail}</p>
+    <p class="src">Of the fifty-seven doghole ports between the Russian River and the Oregon
+    line, historians count more than a hundred and fifty vessels wrecked at or near them.
+    "More often than not, vessels would break apart on the rocks resulting in a total loss."</p>
+    <div class="go">Enter to try her again &nbsp;&middot;&nbsp; Esc for the title screen</div>`);
+}
+function win(){
+  phase = "over";
+  const cords = Math.floor(ship.cargo);
+  card(`<h1>Clear of the cove</h1>
+    <p>You have <b>${cords} cords</b> aboard, in ${Math.floor(elapsed/60)}m ${Math.floor(elapsed%60)}s,
+    with ${ship.damage < .01 ? "not a scratch on her" : "damage taken"}.</p>
+    <p class="src">Fort Ross loaded about sixty cargoes a year like this one: firewood, tanbark,
+    redwood posts and farm produce for San Francisco. Davidson, <i>Pacific Coast Pilot</i> (1889).</p>
+    <div class="go">Enter &mdash; make sail for San Francisco</div>`);
+  sailOn = `gate.html?cargo=${cords}`;
+}
+let sailOn = null;
+
+card(`<h1>Doghole</h1>
+  <p><b>Fort Ross Cove, the Sonoma coast.</b> You are master of a two-masted schooner of
+  seventy-five tons, come up from San Francisco for a cargo of cordwood.</p>
+  <p>There is no wharf to lie to. You must work her into the cove, lie
+  <b>broadside to the end of the chute and head out</b>, pass <b>six lines</b> to the
+  buoys and to the ringbolts in the rock, load, and get out again.</p>
+  <p class="src">
+  &larr; &rarr; helm &nbsp;&middot;&nbsp; &uarr; make sail &nbsp;&middot;&nbsp; &darr; take in sail
+  &nbsp;&middot;&nbsp; space: cast off when you have had enough<br>
+  <b>M</b> mutes &nbsp;&middot;&nbsp; <b>=</b> skip to the run up to San Francisco
+  &nbsp;&middot;&nbsp; <b>Esc</b> back to the title screen<br>
+  Your rudder only bites with way on. You cannot sail within four points of the wind.
+  Under the west bluff your sails will go soft, because the bluff makes a lee.<br>
+  The tide sets along this coast at a quarter to half a mile an hour, and it turns.</p>
+  <div class="go">Enter to begin</div>`);
+
+// -------------------------------------------------------------- loop
+let last = performance.now();
+function frame(now){
+  const dt = Math.min((now-last)/1000, .05); last = now;
+  if (phase === "wrecking"){
+    weatherStep(env, dt); seaLevel(); wreckStep(dt); camUpdate(ship, dt);
+  }
+  const live = phase !== "brief" && phase !== "over" && phase !== "wrecking";
+  try {
+  if (live){
+    elapsed += dt;
+    weatherStep(env, dt);
+    seaLevel();
+    bellStep(dt);
+    lineCool = Math.max(0, lineCool - dt);
+    partT = Math.max(0, partT - dt);
+    ship.helm = (keys["arrowleft"]?-1:0) + (keys["arrowright"]?1:0);
+    const canvasWas = ship.canvas;
+    if (keys["arrowup"]) ship.canvas = Math.min(1, ship.canvas + dt*1.3);
+    if (keys["arrowdown"]) ship.canvas = Math.max(0, ship.canvas - dt*1.3);
+    // she does not squeal continuously: one working of the canvas per touch
+    sailT -= dt;
+    if (Math.abs(ship.canvas - canvasWas) > 1e-4 && sailT <= 0){
+      sailT = .55; makeSail(ship.canvas > canvasWas);
+    }
+    // run at four times life, or working a cargo would take all evening
+    // Time is compressed: the sim runs seven ticks a frame. The knots in
+    // the HUD are true knots, but the shore goes by seven times faster than
+    // it did in 1889, because a cargo took days and you have minutes.
+    for (let i=0;i<7;i++) step(ship, env, dt);
+    wakeStep(dt);
+    hazards(dt);
+    phases(dt);
+  }
+  } catch (err) {
+    // the draw steps were already guarded one by one; the simulation was not,
+    // and a throw here stops requestAnimationFrame for good
+    window.__simErr = window.__simErr || [];
+    if (window.__simErr.length < 12) window.__simErr.push(String(err));
+  }
+  camUpdate(ship, dt);
+
+  ctx.fillStyle = "#0b1016"; ctx.fillRect(0,0,W,H);
+  drawWater();
+  drawSwell(env.t, env);
+  drawFlecks(env.t);
+  drawLand(env.t);
+  drawKelp(env.t);
+  const apron = drawChute(env.t);
+  drawRocks(env.t);
+  drawFastenings(env.t);
+  drawSurf(env.t);
+  drawBuoys(env.t);
+  drawBerth(env.t, ship, phase);
+  drawMoorLines(ship, ship.lines);
+  drawWake(env.t);
+  if (phase === "wrecking") drawWreck();
+  else if (phase !== "over" || !wreck) drawVessel(ctx, T, ship, env.t, C);
+  else drawWreck();
+  if (phase === "load") drawLumber(apron);
+  drawBearingMark();
+  if (phase !== "brief" && phase !== "over") drawRose();
+  drawVignette();
+  drawRain(dt, env.windFrom);
+  drawFlashAndBolt(dt);
+  if (phase === "load" || phase === "depart") drawInset(ship, env.t);
+  // the same guard as the bay: a throw in the readout must not stop the loop
+  try { hud(); } catch (err) {
+    window.__hudErr = window.__hudErr || [];
+    if (window.__hudErr.length < 12) window.__hudErr.push(String(err));
+  }
+  requestAnimationFrame(frame);
+}
+
+// bundles coming down the chute while she loads
+const bundles = [];
+// A bundle does not fly through the air to the ship. It runs DOWN THE TROUGH
+// from the chute head, out along the swing apron, and drops the last few feet
+// to her deck: "the apron's end typically sat at a height of five to ten ft
+// above a vessel's rail". So the first two thirds of its travel are on the
+// chute, and only the last of it is a fall.
+function drawLumber(apron){
+  const [hx, hy] = CV.CHUTE.head;
+  for (const b of bundles){
+    let x, y, drop = 0;
+    if (b.p < .74){                       // on the chute, running out
+      const f = b.p / .74;
+      x = hx + (apron[0] - hx) * f;
+      y = hy + (apron[1] - hy) * f;
+    } else {                              // off the apron's end, falling aboard
+      const f = (b.p - .74) / .26;
+      x = apron[0] + (ship.x - apron[0]) * f;
+      y = apron[1] + (ship.y - apron[1]) * f;
+      drop = Math.sin(f * Math.PI) * 3;
+    }
+    ctx.save();
+    ctx.translate(T.X(x), T.Y(y - drop));
+    ctx.rotate(b.a + b.p * 1.4);
+    ctx.fillStyle = "rgba(8,11,16,.45)";
+    ctx.fillRect(T.S(-5), T.S(-1.4 + drop*.6), T.S(10), T.S(2.8));
+    ctx.fillStyle = C.timberLit;
+    ctx.fillRect(T.S(-5), T.S(-1.4), T.S(10), T.S(2.8));
+    ctx.strokeStyle = "rgba(60,38,14,.8)"; ctx.lineWidth = Math.max(1, T.S(.35));
+    ctx.beginPath();                      // the lashing round the bundle
+    ctx.moveTo(T.S(-1.6), T.S(-1.4)); ctx.lineTo(T.S(-1.6), T.S(1.4));
+    ctx.moveTo(T.S(1.6), T.S(-1.4));  ctx.lineTo(T.S(1.6), T.S(1.4));
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function hazards(dt){
+  // rocks
+  for (const r of ALL_ROCKS){
+    const d = Math.hypot(ship.x-r.x, ship.y-r.y);
+    if (d < r.r + (r.shore ? 4 : 7)){
+      const hard = ship.speedKn > 1.4;
+      fail(hard ? "Struck, and broke up" : "On the rocks",
+        hard ? `You went onto ${r.name} at ${ship.speedKn.toFixed(1)} knots. She broke her back.`
+             : `You set down on ${r.name}. The swell is doing the rest.`);
+      return;
+    }
+  }
+  if (ship.underKeel < 0){
+    if (CV.onLand(ship.x, ship.y) || ship.underKeel < -3){
+      fail("Ashore", `She is on the ground in ${(ship.draftFt+ship.underKeel).toFixed(0)} feet,
+        drawing ${ship.draftFt.toFixed(1)}. On a sand beach you might float her off; here you will not.`);
+      return;
+    }
+    ship.damage += dt*.4;
+  }
+  if (ship.damage > 1){ fail("Bilged", "She has been pounding too long, and has opened up."); }
+}
+
+function phases(dt){
+  const B = CV.BERTH;
+  const d = Math.hypot(ship.x-B.x, ship.y-B.y);
+  const hdgOff = Math.abs(degOf(norm(ship.hdg - B.heading*Math.PI/180)) > 180
+    ? 360 - degOf(norm(ship.hdg - B.heading*Math.PI/180))
+    : degOf(norm(ship.hdg - B.heading*Math.PI/180)));
+
+  if (phase === "approach"){
+    if (d < 120) phase = "moor";
+  }
+  if (phase === "moor"){
+    // You are not expected to park a seventy-five ton schooner by eye. You
+    // never could. You get her near, you throw a line, and the line does the
+    // rest: "she has to be moored by six lines to buoys and shore
+    // fastenings", and the crew hove her into the berth on those lines.
+    // SPACE passes a line whenever she is close enough and slow enough.
+    canPass = d < 90 && ship.speedKn < 3.2 && ship.lines < 6 && lineCool <= 0;
+    if (ship.lines >= 6){ ship.moored = true; phase = "load"; }
+    if (d > 300 && ship.lines === 0) phase = "approach";
+  }
+  if (phase === "load"){
+    loadedFor += dt;
+    loadT += dt;
+    if (loadT > .5){
+      loadT = 0;
+      if (ship.cargo < CAPACITY){
+        ship.cargo += 1;
+        bundles.push({p:0, a:Math.random()*3, sounded:false});
+        chuteRun();                                   // away down the trough
+      }
+    }
+    for (let i=bundles.length-1;i>=0;i--){
+      bundles[i].p += dt*.62;
+      // she lands when it comes off the apron's end, not when it sets off
+      if (!bundles[i].sounded && bundles[i].p > .82){
+        bundles[i].sounded = true; chuteLand();
+      }
+      if (bundles[i].p>1) bundles.splice(i,1);
+    }
+    // the moorings are not infinitely strong, and the sea is getting up
+    if (Math.abs(ship.surge) > .34 && Math.random() < dt*.5 && ship.lines > 0){
+      ship.lines--;
+      // a line going is the loudest thing that happens at a chute
+      playClip(ropeBuf, 1.0, "rope: a line parted");
+      partT = 1.6;
+      if (ship.lines < 3){
+        ship.moored = false;
+        playClip(ropeBuf, 1.2, "rope: broke her moorings");
+        fail("Broke her moorings",
+          "The sea got up and the lines went one after another. Ships frequently broke free from the moorings, and were pushed ashore.");
+      }
+    }
+    if (ship.cargo >= CAPACITY) castOff();
+  }
+  if (phase === "depart"){
+    if (ship.y > 430 && CV.distToShore(ship.x, ship.y) > 300) win();
+  }
+}
+
+// --------------------------------------------------------------- HUD
+function pts(deg){
+  const n = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return n[Math.round(((deg%360)+360)%360/22.5)%16];
+}
+function hud(){
+  const uk = ship.underKeel;
+  const ukc = uk < 3 ? "r" : uk < 8 ? "a" : "g";
+  el("nav").innerHTML = `
+    <div>Head <b>${pts(degOf(ship.hdg))} ${degOf(ship.hdg).toFixed(0)}&deg;</b></div>
+    <div>Speed <b>${ship.speedKn.toFixed(1)} kn</b></div>
+    <div>Under the keel <span class="${ukc}"><b>${uk>0?uk.toFixed(0):"AGROUND"}</b>${uk>0?" ft":""}</span></div>
+    <div>Wind <b>${pts(env.windFrom)} ${env.windKn.toFixed(0)} kn</b>${env.southEaster?' <span class="r">southeaster</span>':""}</div>
+    <div>Tide sets <b>${pts(degOf(Math.atan2(env.curX,-env.curY)))}</b> ${(Math.hypot(env.curX,env.curY)/KN).toFixed(2)} kn</div>
+    <div>Sea <b>${env.swell<.16?"smooth":env.swell<.26?"a swell":env.swell<.34?"getting up":"heavy"}</b></div>`;
+  el("sail").innerHTML = `
+    <div>Canvas <b>${(ship.canvas*100).toFixed(0)}%</b> <span class="bar"><i style="width:${ship.canvas*100}%"></i></span></div>
+    <div>${ship.inIrons?'<span class="r">In irons. Helm over and bear away until she draws</span>':
+        ship.becalmed?'<span class="a">Under the bluff, and your sails are soft</span>':
+        ship.throughKn<.6?'<span class="a">No way on: the helm will not answer</span>':'Helm answering'}</div>`;
+  el("cargo").innerHTML = `
+    <div>Cargo <b>${Math.floor(ship.cargo)}</b> / ${CAPACITY} cords</div>
+    <div>Lines out <b>${ship.lines}</b> / 6</div>
+    ${phase==="moor" ? (canPass
+      ? `<div class="g">SPACE &mdash; pass a line to ${CV.FASTENINGS[ship.lines].name}</div>`
+      : lineCool > 0
+        ? '<div class="a">Running a line&hellip;</div>'
+        : `<div class="a">${ship.speedKn >= 3.2 ? "Too much way on to pass a line" : "Closer, and she can take a line"}</div>`) : ""}
+    ${phase==="load" && loadedFor > 1.5 ? '<div class="g">SPACE &mdash; cast off</div>' : ""}
+    ${ship.damage>.02?`<div class="r">Taking damage</div>`:""}
+    ${partT>0?`<div class="r">A LINE HAS PARTED</div>`:""}`;
+  const orders = {
+    approach: "Work her into the cove. Mind the kelp off the western point: there are sunken rocks under it, and they take the vessels that hug that shore coming in with a north-wester.",
+    moor: "Bring her up near the mark and pass your lines. Space throws one. Six lines will haul her in and hold her broadside to the chute, head out. You are not expected to park her by eye: nobody ever could.",
+    load: "Loading. She is filling from the chute. Space to cast off when you have had enough of the sea that is getting up.",
+    depart: "Cast off. Get her out past the buoy and clear of the reef, heavy as she is.",
+    over: "",
+  };
+  el("phase").textContent = {approach:"The run in", moor:"The moor", load:"Loading",
+    depart:"The run out", over:"", brief:""}[phase] || "";
+  el("order").textContent = orders[phase] || "";
+}
+
+// window.__ring() sounds the bell on demand, for checking it is audible
+// every sound in the game, on demand, so they can be judged one at a time
+window.__sfx = {
+  ring:   v => playClip(bellBuf, v || 1),
+  snap:   v => playClip(ropeBuf, v || 1),
+  chute:  () => chuteRun(),
+  land:   () => chuteLand(),
+  thunder: near => thunder(near !== false),
+  sail:   up => makeSail(up !== false),
+  line:   n => lineFast(n || 1),
+  crash:  () => crashSound(),
+};
+window.__ring = window.__sfx.ring;
+window.__snap = window.__sfx.snap;
+
+// dev hooks, for testing a phase without sailing the whole way in
+window.__dev = {
+  get ship(){ return ship; },
+  get env(){ return env; },
+  get phase(){ return phase; },
+  put(x, y, hdgDeg, spd = 0){
+    ship.x = x; ship.y = y; ship.hdg = (hdgDeg||0)*Math.PI/180;
+    ship.vx = 0; ship.vy = 0; ship.omega = 0; ship.canvas = spd;
+  },
+  berth(){ this.put(CV.BERTH.x, CV.BERTH.y, CV.BERTH.heading, 0); },
+  wind(fromDeg, kn){ env.windFrom = fromDeg; env.windKn = kn; },
+  cargo(n){ ship.cargo = n; },
+};
+
+requestAnimationFrame(frame);
+</script>
