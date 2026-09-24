@@ -113,6 +113,9 @@
       rgba(5,8,13,.24) 0%, rgba(5,8,13,.46) 50%, rgba(5,8,13,.72) 100%);
     transition: opacity 1.4s ease; cursor: pointer; }
   #curtain.gone { opacity: 0; pointer-events: none; }
+  /* framed in a cabinet: no veil, so the attract reads across the room */
+  html.framed #curtain { background: none; }
+  html.framed .grade { opacity: .45; }
   #curtain p { margin: 0; font-size: 15px; letter-spacing: .16em;
     color: var(--amber); padding: 9px 20px; border: 1px solid rgba(232,163,61,.45);
     border-radius: 2px; background: rgba(5,8,13,.72);
@@ -197,6 +200,11 @@ const LANDINGS = [
 // ninety feet, out over the water) - Counterweight (the only thing that comes
 // back up) - The Clapper (a movable plank at the end of the chute).
 // NOT sourced, never use: Gallows Frame, Clapperman, Cape Stiff.
+
+// Are we in a cabinet? If so the glass is small and the room is lit, so the
+// scene has to run at full strength rather than under a veil.
+try { if (window.self !== window.top) document.documentElement.classList.add("framed"); }
+catch (e) { document.documentElement.classList.add("framed"); }
 
 const cv  = document.getElementById("scene");
 const ctx = cv.getContext("2d", { alpha: false });
